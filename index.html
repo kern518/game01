@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>机甲风暴：废土试作</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="game-panel" aria-label="游戏画面">
+        <div class="topbar">
+          <div>
+            <h1>机甲风暴：废土试作</h1>
+            <p id="areaLabel">旧城区外围</p>
+          </div>
+          <div class="resource-strip" aria-label="资源">
+            <span><b id="credits">120</b> Cr</span>
+            <span><b id="scrap">0</b> 零件</span>
+            <span><b id="wins">0</b> 胜</span>
+          </div>
+          <nav class="game-menu" aria-label="游戏菜单">
+            <button data-screen="map">地图</button>
+            <button data-panel="mech">机体</button>
+            <button data-panel="pilot">人物</button>
+            <button data-panel="equip">装备</button>
+            <button data-panel="log">通讯</button>
+            <button data-screen="hangar">机库</button>
+          </nav>
+        </div>
+
+        <div class="screen-wrap">
+          <div id="hangarLayer" class="hangar-layer" aria-label="机库界面">
+            <div class="pilot-showcase">
+              <img src="assets/pilot-concept-large.png" alt="驾驶员洛辰">
+            </div>
+            <div class="hangar-main">
+              <div class="hangar-title">
+                <span>机库待命</span>
+                <strong>RX-17 游隼</strong>
+              </div>
+              <canvas id="hangarMech" width="240" height="180" aria-label="当前机甲"></canvas>
+              <div class="mission-card">
+                <b>任务</b>
+                <p>旧城区外缘出现四台失控机甲。确认蓝图碎片位置，回收核心数据。</p>
+              </div>
+              <div class="hangar-actions">
+                <button data-screen="battle">出击</button>
+                <button data-screen="map">大地图</button>
+                <button data-screen="repair">整备</button>
+              </div>
+            </div>
+          </div>
+          <canvas id="game" width="896" height="576" aria-label="像素游戏画面"></canvas>
+          <div id="battleLayer" class="battle-layer hidden" aria-live="polite">
+            <div class="battle-arena">
+              <canvas id="battle" width="640" height="284"></canvas>
+              <div class="combatants">
+                <div class="unit-card">
+                  <span>RX-17 游隼</span>
+                  <meter id="playerHp" min="0" max="100" value="100"></meter>
+                  <meter id="playerEn" min="0" max="100" value="42"></meter>
+                </div>
+                <div class="unit-card enemy">
+                  <span id="enemyName">敌机</span>
+                  <meter id="enemyHp" min="0" max="100" value="100"></meter>
+                  <meter id="enemyEn" min="0" max="100" value="35"></meter>
+                </div>
+              </div>
+            </div>
+            <div class="command-row">
+              <button data-action="attack">机炮</button>
+              <button data-action="blade">光刃</button>
+              <button data-action="missile">导弹</button>
+              <button data-action="guard">防御</button>
+              <button data-action="repair">修理</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side-panel" aria-label="状态面板" data-active="mech">
+        <div class="panel-title">
+          <strong id="panelTitle">机体</strong>
+          <button type="button" data-panel-close>关闭</button>
+        </div>
+        <section class="status-block" data-panel-section="mech">
+          <h2>机体</h2>
+          <div class="mech-line">
+            <span>RX-17 游隼</span>
+            <strong id="level">Lv.1</strong>
+          </div>
+          <div class="stat-grid">
+            <span>装甲</span><b id="armor">120</b>
+            <span>能量</span><b id="energyText">42 / 60</b>
+            <span>武器</span><b id="weapon">脉冲机炮</b>
+            <span>芯片</span><b id="chip">动能调谐</b>
+          </div>
+        </section>
+
+        <section class="status-block comms-card" data-panel-section="pilot">
+          <h2>人物</h2>
+          <div class="comms-row">
+            <canvas id="portrait" width="64" height="64" aria-label="通讯头像"></canvas>
+            <div>
+              <strong id="speaker">驾驶员 洛辰</strong>
+              <p id="speech">游隼上线，等待出击指令。</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="status-block" data-panel-section="equip">
+          <h2>装备</h2>
+          <div class="loadout">
+            <button class="slot active" data-equip="pulse">脉冲机炮</button>
+            <button class="slot" data-equip="rail">磁轨炮</button>
+            <button class="slot" data-equip="repair">维修核心</button>
+          </div>
+        </section>
+
+        <section class="status-block log-block" data-panel-section="log">
+          <h2>通讯</h2>
+          <ol id="log"></ol>
+        </section>
+      </aside>
+    </main>
+
+    <div class="panel-backdrop" data-panel-close></div>
+
+    <div class="mobile-pad" aria-label="移动控制">
+      <button data-move="up">▲</button>
+      <button data-move="left">◀</button>
+      <button data-move="down">▼</button>
+      <button data-move="right">▶</button>
+    </div>
+
+    <script src="game.js"></script>
+  </body>
+</html>
