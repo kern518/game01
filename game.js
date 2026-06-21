@@ -66,38 +66,40 @@ function loadImage(src) {
 }
 
 const TILE = 32;
-const STEP_DURATION = 125;
-const map = [
+const STEP_DURATION = 165;
+const COLLISION_STORAGE_KEY = "mechaStorm.collisionMap.v1";
+const defaultMap = [
   "############################",
-  "#######.....#####.....######",
-  "###.........#####..E....####",
-  "##.......................###",
-  "##...B.............###....##",
-  "##.........................#",
-  "##.....r.............##....#",
-  "##.........................#",
-  "##..E......P...............#",
-  "##...................###E..#",
-  "##.....rr...........###....#",
-  "##.........................#",
-  "###.........####...........#",
-  "####.......######..........#",
-  "#####.....########.........#",
-  "#######.....#####..........#",
+  "##########s.######..########",
+  "##########..######..########",
+  "#########...........E...####",
+  "#########........###....####",
+  "###B####........####....####",
+  "########.................###",
+  "########................E.##",
+  "###E......r.P......###....##",
+  "########..........#####E..##",
+  "########rr........####....##",
+  "########..........####....##",
+  "###........#####..........##",
+  "####.......######.........##",
+  "#####.....########........##",
+  "######.....#######........##",
   "#########....#####....######",
   "############################",
 ];
+let map = loadCollisionMap();
 
 const enemies = [
-  { x: 20, y: 2, name: "獠牙巡逻机", hp: 72, maxHp: 72, en: 28, atk: 13, sprite: 1, defeated: false },
-  { x: 4, y: 8, name: "废土盾卫", hp: 96, maxHp: 96, en: 22, atk: 11, sprite: 2, defeated: false },
+  { x: 20, y: 3, name: "獠牙巡逻机", hp: 72, maxHp: 72, en: 28, atk: 13, sprite: 1, defeated: false },
+  { x: 3, y: 8, name: "废土盾卫", hp: 96, maxHp: 96, en: 22, atk: 11, sprite: 2, defeated: false },
   { x: 23, y: 9, name: "蜂群炮艇", hp: 64, maxHp: 64, en: 42, atk: 15, sprite: 3, defeated: false },
-  { x: 19, y: 5, name: "黑匣子原型机", hp: 128, maxHp: 128, en: 48, atk: 17, sprite: 4, defeated: false },
+  { x: 24, y: 7, name: "黑匣子原型机", hp: 128, maxHp: 128, en: 48, atk: 17, sprite: 4, defeated: false },
 ];
 
 const npcs = [
-  { x: 5, y: 5, sprite: 1, speaker: "基地指挥官", text: "旧城区还有四台敌机，把蓝图碎片带回来。" },
-  { x: 8, y: 1, sprite: 2, speaker: "机械师 阿棠", text: "维修站能扩装甲，先攒两块零件。" },
+  { x: 3, y: 5, sprite: 1, speaker: "基地指挥官", text: "旧城区还有四台敌机，把蓝图碎片带回来。" },
+  { x: 10, y: 1, sprite: 2, speaker: "机械师 阿棠", text: "维修站能扩装甲，先攒两块零件。" },
 ];
 
 const tileSprites = {
@@ -145,6 +147,7 @@ let lastMoveDy = 0;
 let lastMoveDx = 0;
 let queuedMove = null;
 let heldMove = null;
+let showCollisionDebug = false;
 
 const panelTitles = {
   mech: "机体",
@@ -181,6 +184,36 @@ function tileAt(x, y) {
 
 function enemyAt(x, y) {
   return enemies.find((enemy) => !enemy.defeated && enemy.x === x && enemy.y === y);
+}
+
+function loadCollisionMap() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLLISION_STORAGE_KEY) || "null");
+    if (Array.isArray(saved) && saved.length === defaultMap.length && saved.every((row, index) => row.length === defaultMap[index].length)) {
+      return saved;
+    }
+  } catch {
+    localStorage.removeItem(COLLISION_STORAGE_KEY);
+  }
+  return [...defaultMap];
+}
+
+function saveCollisionMap() {
+  localStorage.setItem(COLLISION_STORAGE_KEY, JSON.stringify(map));
+}
+
+function setCollisionTile(x, y, type) {
+  if (!map[y] || x < 0 || x >= map[y].length) return;
+  const chars = map[y].split("");
+  chars[x] = type;
+  map[y] = chars.join("");
+  saveCollisionMap();
+}
+
+function resetCollisionMap() {
+  map = [...defaultMap];
+  saveCollisionMap();
+  addLog("碰撞层已恢复默认。");
 }
 
 function rememberDirection(dx, dy) {
@@ -603,6 +636,7 @@ function drawMap() {
       }
     }
   }
+  if (showCollisionDebug) drawCollisionOverlay(camera);
   const actors = [];
   enemies.forEach((enemy) => {
     if (enemy.defeated) return;
@@ -640,7 +674,32 @@ function drawMap() {
   mapCtx.fillRect(10, 10, 356, 30);
   mapCtx.fillStyle = "#e6edf1";
   mapCtx.font = "14px Microsoft YaHei, sans-serif";
-  mapCtx.fillText("方向键/WASD 移动，接触红标敌人进入机甲战斗", 20, 30);
+  const help = showCollisionDebug ? "C 关闭碰撞，点击=可走，Shift+点击=不可走，R 重置" : "方向键/WASD 移动，接触红标敌人进入机甲战斗，C 显示碰撞";
+  mapCtx.fillText(help, 20, 30);
+}
+
+function drawCollisionOverlay(camera) {
+  mapCtx.save();
+  mapCtx.font = "10px Consolas, monospace";
+  mapCtx.textBaseline = "top";
+  for (let y = 0; y < map.length; y += 1) {
+    for (let x = 0; x < map[y].length; x += 1) {
+      const type = map[y][x];
+      const px = x * TILE - camera.x;
+      const py = y * TILE - camera.y;
+      const isBlocked = type === "#";
+      const isEvent = type !== "." && type !== "#";
+      mapCtx.fillStyle = isBlocked ? "rgba(255, 62, 72, 0.34)" : isEvent ? "rgba(255, 220, 92, 0.34)" : "rgba(86, 255, 150, 0.16)";
+      mapCtx.fillRect(px, py, TILE, TILE);
+      mapCtx.strokeStyle = isBlocked ? "rgba(255, 120, 120, 0.82)" : "rgba(120, 255, 190, 0.36)";
+      mapCtx.strokeRect(px + 0.5, py + 0.5, TILE - 1, TILE - 1);
+      if (isBlocked || isEvent) {
+        mapCtx.fillStyle = "rgba(255, 255, 255, 0.86)";
+        mapCtx.fillText(type, px + 3, py + 3);
+      }
+    }
+  }
+  mapCtx.restore();
 }
 
 function getPlayerDrawPosition(now) {
@@ -815,6 +874,23 @@ document.addEventListener("keyup", (event) => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closePanel();
+  if (event.key.toLowerCase() === "c") {
+    showCollisionDebug = !showCollisionDebug;
+    addLog(showCollisionDebug ? "碰撞调试已开启。" : "碰撞调试已关闭。");
+  }
+  if (showCollisionDebug && event.key.toLowerCase() === "r") resetCollisionMap();
+});
+
+mapCanvas.addEventListener("pointerdown", (event) => {
+  if (mode !== "map" || !showCollisionDebug) return;
+  event.preventDefault();
+  const rect = mapCanvas.getBoundingClientRect();
+  const scaleX = mapCanvas.width / rect.width;
+  const scaleY = mapCanvas.height / rect.height;
+  const x = Math.floor(((event.clientX - rect.left) * scaleX) / TILE);
+  const y = Math.floor(((event.clientY - rect.top) * scaleY) / TILE);
+  setCollisionTile(x, y, event.shiftKey ? "#" : ".");
+  addLog(event.shiftKey ? `已设为不可走：${x}, ${y}` : `已设为可走：${x}, ${y}`);
 });
 
 document.querySelectorAll("[data-action]").forEach((button) => {
