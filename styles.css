@@ -125,6 +125,7 @@ h2 {
 .screen-wrap {
   position: relative;
   padding: 12px;
+  min-height: 604px;
 }
 
 .hangar-layer {
@@ -279,7 +280,7 @@ canvas {
 .dev-mode-row,
 .dev-actions {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
 }
 
@@ -309,12 +310,27 @@ canvas {
   color: var(--accent);
 }
 
-.dev-tools select {
+.dev-tools select,
+.dev-tools input[type="text"],
+.dev-tools input[type="number"],
+.dev-tools textarea {
   width: 100%;
   border: 1px solid #526db2;
   background: #08101d;
   color: var(--text);
   min-height: 28px;
+  font: inherit;
+}
+
+.dev-tools textarea {
+  resize: vertical;
+  min-height: 58px;
+  line-height: 1.35;
+  padding: 6px;
+}
+
+.npc-editor {
+  gap: 7px;
 }
 
 .dev-check {
@@ -342,8 +358,8 @@ canvas {
 .battle-layer {
   position: absolute;
   inset: 12px;
-  display: grid;
-  grid-template-rows: 1fr auto;
+  display: flex;
+  flex-direction: column;
   background: rgba(2, 5, 10, 0.96);
   border: 2px solid #58c7ff;
   box-shadow: inset 0 0 18px rgba(88, 199, 255, 0.24);
@@ -355,16 +371,22 @@ canvas {
 
 .battle-arena {
   position: relative;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  flex: 0 0 auto;
+}
+
+#battle {
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
 }
 
 .combatants {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 8px;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  display: none;
 }
 
 .unit-card {
@@ -394,6 +416,7 @@ meter {
   padding: 10px;
   background: #141b22;
   border-top: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 
 button {

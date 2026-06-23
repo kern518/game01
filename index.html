@@ -64,6 +64,7 @@
             <div class="dev-mode-row" aria-label="编辑模式">
               <button type="button" data-dev-action="collision-mode">碰撞</button>
               <button type="button" data-dev-action="npc-mode">NPC</button>
+              <button type="button" data-dev-action="scrap-mode">零件</button>
             </div>
             <label class="dev-check">
               <input id="enemyVisible" type="checkbox">
@@ -83,16 +84,50 @@
               <select id="npcSelect"></select>
             </label>
             <div id="npcCoords" class="dev-coords">实例 0 个</div>
+            <div class="dev-section npc-editor">
+              <b>当前 NPC</b>
+              <div id="npcSelected" class="dev-coords">未选中</div>
+              <label>
+                名字
+                <input id="npcSpeakerInput" type="text" maxlength="20" placeholder="NPC 名字">
+              </label>
+              <label>
+                对话
+                <textarea id="npcTextInput" rows="3" maxlength="120" placeholder="NPC 对话"></textarea>
+              </label>
+              <label class="dev-check">
+                <input id="npcBlockingInput" type="checkbox">
+                阻挡玩家
+              </label>
+              <div class="dev-actions">
+                <button type="button" data-dev-action="npc-preview">预览对话</button>
+                <button type="button" data-dev-action="npc-save-text">保存文本</button>
+              </div>
+            </div>
             <div class="dev-actions">
               <button type="button" data-dev-action="npc-erase-mode">擦除</button>
               <button type="button" data-dev-action="npc-clear">清空全部</button>
               <button type="button" data-dev-action="npc-reset">重置</button>
             </div>
+            <div class="dev-section">
+              <b>零件层</b>
+              <p>零件模式下：点击地图放置，Shift+点击删除。</p>
+              <label>
+                奖励数量
+                <input id="scrapAmountInput" type="number" min="1" max="9" value="1">
+              </label>
+              <div id="scrapCoords" class="dev-coords">零件点 0 个</div>
+              <div class="dev-actions">
+                <button type="button" data-dev-action="scrap-erase-mode">擦除</button>
+                <button type="button" data-dev-action="scrap-clear">清空零件</button>
+                <button type="button" data-dev-action="scrap-reset">重置零件</button>
+              </div>
+            </div>
             <p id="devHint">选择编辑模式后，点击地图修改对应图层。</p>
           </div>
           <div id="battleLayer" class="battle-layer hidden" aria-live="polite">
             <div class="battle-arena">
-              <canvas id="battle" width="640" height="284"></canvas>
+              <canvas id="battle" width="640" height="360"></canvas>
               <div class="combatants">
                 <div class="unit-card">
                   <span>RX-17 游隼</span>
@@ -172,6 +207,6 @@
       <button data-move="right">▶</button>
     </div>
 
-    <script src="game.js?v=walk-direction-v11"></script>
+    <script src="game.js?v=battle-field-ui-v19"></script>
   </body>
 </html>

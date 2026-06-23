@@ -32,6 +32,12 @@ const ui = {
   devTools: document.querySelector("#devTools"),
   npcSelect: document.querySelector("#npcSelect"),
   npcCoords: document.querySelector("#npcCoords"),
+  npcSelected: document.querySelector("#npcSelected"),
+  npcSpeakerInput: document.querySelector("#npcSpeakerInput"),
+  npcTextInput: document.querySelector("#npcTextInput"),
+  npcBlockingInput: document.querySelector("#npcBlockingInput"),
+  scrapAmountInput: document.querySelector("#scrapAmountInput"),
+  scrapCoords: document.querySelector("#scrapCoords"),
   devHint: document.querySelector("#devHint"),
   enemyVisible: document.querySelector("#enemyVisible"),
 };
@@ -54,6 +60,7 @@ const assets = {
   effects: loadImage("assets/effects.png"),
   icons: loadImage("assets/ui-icons.png"),
   battleBg: loadImage("assets/battle-bg.png"),
+  battleField: loadImage("assets/battle-bg-field.png"),
 };
 
 const assetState = {
@@ -121,6 +128,14 @@ const defaultNpcInstances = [];
 runStorageMigration();
 let npcs = loadNpcLayout();
 
+const defaultScrapNodes = [
+  { id: "scrap-01", x: 6, y: 12, amount: 1, label: "散落零件" },
+  { id: "scrap-02", x: 15, y: 8, amount: 2, label: "废弃补给箱" },
+  { id: "scrap-03", x: 21, y: 15, amount: 2, label: "损坏能源匣" },
+  { id: "scrap-04", x: 24, y: 4, amount: 3, label: "机体残骸" },
+];
+let scrapNodes = cloneDefaultScrapNodes();
+
 const tileSprites = {
   ".": 0,
   "#": 1,
@@ -143,6 +158,8 @@ const player = {
   scrap: 0,
   wins: 0,
   level: 1,
+  atk: 32,
+  defense: 18,
   weapon: "pulse",
   guard: false,
 };
@@ -170,9 +187,13 @@ let heldMove = null;
 const pressedMoveKeys = new Set();
 let showCollisionDebug = false;
 let showNpcDebug = false;
+let showScrapDebug = false;
 let showEnemyMarkers = !DEV_MODE;
 let selectedNpcType = "npc1";
+let selectedNpcInstanceId = null;
+let dialogOpenNpcId = null;
 let npcEraseMode = false;
+let scrapEraseMode = false;
 let demoComplete = false;
 
 const panelTitles = {
@@ -210,6 +231,76 @@ function tileAt(x, y) {
 
 function enemyAt(x, y) {
   return enemies.find((enemy) => !enemy.defeated && enemy.x === x && enemy.y === y);
+}
+
+function cloneDefaultScrapNodes() {
+  return defaultScrapNodes.map((node) => ({ ...node, collected: false }));
+}
+
+function scrapNodeAt(x, y) {
+  return scrapNodes.find((node) => !node.collected && node.x === x && node.y === y);
+}
+
+function anyScrapNodeAt(x, y) {
+  return scrapNodes.find((node) => node.x === x && node.y === y);
+}
+
+function selectedScrapAmount() {
+  const value = Number.parseInt(ui.scrapAmountInput?.value ?? "1", 10);
+  return Math.max(1, Math.min(9, Number.isFinite(value) ? value : 1));
+}
+
+function placeScrapNode(x, y) {
+  if (!map[y] || x < 0 || x >= map[y].length) return;
+  const existing = anyScrapNodeAt(x, y);
+  if (existing) {
+    existing.amount = selectedScrapAmount();
+    existing.collected = false;
+    existing.label = "自定义零件点";
+    addLog(`零件点已更新：${x}, ${y} / +${existing.amount}`);
+  } else {
+    const node = {
+      id: `scrap-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
+      x,
+      y,
+      amount: selectedScrapAmount(),
+      label: "自定义零件点",
+      collected: false,
+    };
+    scrapNodes.push(node);
+    addLog(`零件点已放置：${x}, ${y} / +${node.amount}`);
+  }
+  updateNpcEditor();
+}
+
+function removeScrapNodeAt(x, y) {
+  const index = scrapNodes.findIndex((node) => node.x === x && node.y === y);
+  if (index < 0) {
+    addLog(`这里没有零件点：${x}, ${y}。`);
+    return;
+  }
+  scrapNodes.splice(index, 1);
+  updateNpcEditor();
+  addLog(`零件点已删除：${x}, ${y}`);
+}
+
+function clearScrapNodes() {
+  scrapNodes = [];
+  updateNpcEditor();
+  updateUi();
+  addLog("零件层已清空。");
+}
+
+function resetScrapNodes() {
+  scrapNodes = cloneDefaultScrapNodes();
+  scrapEraseMode = false;
+  updateNpcEditor();
+  updateUi();
+  addLog("零件层已恢复默认。");
+}
+
+function blockingNpcAt(x, y) {
+  return npcs.find((npc) => npc.blocking && npc.x === x && npc.y === y);
 }
 
 function loadCollisionMap() {
@@ -259,11 +350,14 @@ function npcTemplate(type) {
 function hydrateNpcInstance(instance, index = 0) {
   const template = npcTemplate(instance?.type);
   return {
+    ...template,
     id: instance?.id ?? `npc-${Date.now()}-${index}`,
     type: template.type,
     x: Number.isInteger(instance?.x) ? instance.x : 0,
     y: Number.isInteger(instance?.y) ? instance.y : 0,
-    ...template,
+    speaker: typeof instance?.speaker === "string" ? instance.speaker : template.speaker,
+    text: typeof instance?.text === "string" ? instance.text : template.text,
+    blocking: Boolean(instance?.blocking),
   };
 }
 
@@ -310,7 +404,7 @@ function loadNpcLayout() {
 function saveNpcLayout() {
   localStorage.setItem(
     NPC_STORAGE_KEY,
-    JSON.stringify(npcs.map(({ id, type, x, y }) => ({ id, type, x, y }))),
+    JSON.stringify(npcs.map(({ id, type, x, y, speaker, text, blocking }) => ({ id, type, x, y, speaker, text, blocking }))),
   );
 }
 
@@ -318,6 +412,7 @@ function resetNpcLayout() {
   localStorage.removeItem(NPC_STORAGE_KEY);
   npcs = cloneDefaultNpcs();
   selectedNpcType = npcTemplates[0]?.type ?? "npc1";
+  selectedNpcInstanceId = null;
   npcEraseMode = false;
   updateNpcEditor();
   addLog("NPC 层已重置为空。");
@@ -325,9 +420,23 @@ function resetNpcLayout() {
 
 function clearNpcLayout() {
   npcs = [];
+  selectedNpcInstanceId = null;
   saveNpcLayout();
   updateNpcEditor();
   addLog("NPC 层已清空，可任意重新摆放。");
+}
+
+function selectedNpcInstance() {
+  return npcs.find((npc) => npc.id === selectedNpcInstanceId) ?? null;
+}
+
+function selectNpcInstance(npc) {
+  selectedNpcInstanceId = npc?.id ?? null;
+  if (npc) {
+    selectedNpcType = npc.type;
+    setComms(npc.speaker, npc.text, npc.portrait);
+  }
+  updateNpcEditor();
 }
 
 function placeNpcInstance(x, y) {
@@ -340,6 +449,7 @@ function placeNpcInstance(x, y) {
     y,
   });
   npcs.push(npc);
+  selectedNpcInstanceId = npc.id;
   saveNpcLayout();
   updateNpcEditor();
   addLog(`${template.label} 已新增到 ${x}, ${y}。`);
@@ -353,9 +463,95 @@ function removeNpcAt(x, y) {
   }
   const realIndex = npcs.length - 1 - index;
   const [removed] = npcs.splice(realIndex, 1);
+  if (selectedNpcInstanceId === removed.id) selectedNpcInstanceId = null;
   saveNpcLayout();
   updateNpcEditor();
   addLog(`${removed.label} 已从 ${x}, ${y} 移除。`);
+}
+
+function npcAt(x, y) {
+  return [...npcs].reverse().find((npc) => npc.x === x && npc.y === y) ?? null;
+}
+
+function facingDelta() {
+  if (lastMoveDy < 0) return { dx: 0, dy: -1 };
+  if (lastMoveDy > 0) return { dx: 0, dy: 1 };
+  if (lastMoveDx < 0 || facing < 0) return { dx: -1, dy: 0 };
+  return { dx: 1, dy: 0 };
+}
+
+function nearbyPoints() {
+  const { dx, dy } = facingDelta();
+  return [
+    { x: player.x + dx, y: player.y + dy },
+    { x: player.x, y: player.y },
+    { x: player.x, y: player.y + 1 },
+    { x: player.x, y: player.y - 1 },
+    { x: player.x - 1, y: player.y },
+    { x: player.x + 1, y: player.y },
+  ];
+}
+
+function collectScrapNode(node) {
+  if (!node || node.collected) return false;
+  node.collected = true;
+  player.scrap += node.amount;
+  setComms("系统", `回收 ${node.label}，获得 ${node.amount} 个零件。`, 0);
+  addLog(`回收 ${node.label}：+${node.amount} 零件。`);
+  updateUi();
+  return true;
+}
+
+function collectNearbyScrap() {
+  const node = nearbyPoints().map((point) => scrapNodeAt(point.x, point.y)).find(Boolean);
+  return collectScrapNode(node);
+}
+
+function interactWithNpc() {
+  if (mode !== "map") return false;
+  const target = nearbyPoints().map((point) => npcAt(point.x, point.y)).find(Boolean);
+  if (!target) {
+    if (collectNearbyScrap()) return true;
+    addLog("附近没有可交互的 NPC。");
+    return false;
+  }
+  if (dialogOpenNpcId === target.id && document.body.classList.contains("panel-open") && sidePanel.dataset.active === "pilot") {
+    closePanel();
+    return true;
+  }
+  selectedNpcInstanceId = target.id;
+  dialogOpenNpcId = target.id;
+  setComms(target.speaker, target.text, target.portrait);
+  openPanel("pilot");
+  updateNpcEditor();
+  addLog(`正在对话：${target.speaker}`);
+  return true;
+}
+
+function saveSelectedNpcText() {
+  const npc = selectedNpcInstance();
+  if (!npc) {
+    addLog("请先在地图上选择一个 NPC。");
+    return;
+  }
+  npc.speaker = ui.npcSpeakerInput?.value.trim() || npcTemplate(npc.type).speaker;
+  npc.text = ui.npcTextInput?.value.trim() || npcTemplate(npc.type).text;
+  npc.blocking = Boolean(ui.npcBlockingInput?.checked);
+  saveNpcLayout();
+  updateNpcEditor();
+  setComms(npc.speaker, npc.text, npc.portrait);
+  addLog(`${npc.label} 的对话已保存。`);
+}
+
+function previewSelectedNpcText() {
+  const npc = selectedNpcInstance();
+  if (!npc) {
+    addLog("请先在地图上选择一个 NPC。");
+    return;
+  }
+  const speaker = ui.npcSpeakerInput?.value.trim() || npc.speaker;
+  const text = ui.npcTextInput?.value.trim() || npc.text;
+  setComms(speaker, text, npc.portrait);
 }
 
 function updateNpcEditor() {
@@ -366,23 +562,53 @@ function updateNpcEditor() {
     const count = npcs.filter((npc) => npc.type === selectedNpcType).length;
     ui.npcCoords.textContent = `${template.label}：${count} 个 / 总计 ${npcs.length} 个`;
   }
+  const selected = selectedNpcInstance();
+  if (ui.npcSelected) {
+    ui.npcSelected.textContent = selected ? `${selected.label} @ ${selected.x}, ${selected.y}` : "未选中";
+  }
+  if (ui.npcSpeakerInput) {
+    ui.npcSpeakerInput.value = selected?.speaker ?? "";
+    ui.npcSpeakerInput.disabled = !selected;
+  }
+  if (ui.npcTextInput) {
+    ui.npcTextInput.value = selected?.text ?? "";
+    ui.npcTextInput.disabled = !selected;
+  }
+  if (ui.npcBlockingInput) {
+    ui.npcBlockingInput.checked = Boolean(selected?.blocking);
+    ui.npcBlockingInput.disabled = !selected;
+  }
   document.querySelectorAll("[data-dev-action='collision-mode']").forEach((button) => {
     button.classList.toggle("active", showCollisionDebug);
   });
   document.querySelectorAll("[data-dev-action='npc-mode']").forEach((button) => {
     button.classList.toggle("active", showNpcDebug);
   });
+  document.querySelectorAll("[data-dev-action='scrap-mode']").forEach((button) => {
+    button.classList.toggle("active", showScrapDebug);
+  });
   document.querySelectorAll("[data-dev-action='npc-erase-mode']").forEach((button) => {
     button.classList.toggle("active", npcEraseMode);
   });
+  document.querySelectorAll("[data-dev-action='scrap-erase-mode']").forEach((button) => {
+    button.classList.toggle("active", scrapEraseMode);
+  });
+  if (ui.scrapCoords) {
+    const active = scrapNodes.filter((node) => !node.collected).length;
+    ui.scrapCoords.textContent = `零件点 ${active} / 总计 ${scrapNodes.length} 个`;
+  }
   if (ui.devHint) {
     ui.devHint.textContent = showNpcDebug
       ? npcEraseMode
         ? "当前：NPC 层擦除。点击 NPC 所在格删除最上层 NPC。"
-        : "当前：NPC 层放置。点击地图会新增一个所选模板 NPC。"
+        : "当前：NPC 层。点已有 NPC 选择编辑，点空格新增，Ctrl+点强制新增。"
+      : showScrapDebug
+        ? scrapEraseMode
+          ? "当前：零件层擦除。点击零件点删除。"
+          : "当前：零件层。点击地图放置或更新零件点，Shift+点击删除。"
       : showCollisionDebug
         ? "当前：碰撞层。点击可走，Shift+点击不可走。"
-        : "选择碰撞或 NPC 模式后，点击地图修改对应图层。";
+        : "选择碰撞、NPC 或零件模式后，点击地图修改对应图层。";
   }
   if (ui.enemyVisible) ui.enemyVisible.checked = showEnemyMarkers;
 }
@@ -424,7 +650,8 @@ function buildSaveData() {
     })),
     demoComplete,
     map,
-    npcs: npcs.map(({ id, type, x, y }) => ({ id, type, x, y })),
+    npcs: npcs.map(({ id, type, x, y, speaker, text, blocking }) => ({ id, type, x, y, speaker, text, blocking })),
+    scrapNodes: scrapNodes.map(({ id, x, y, amount, label, collected }) => ({ id, x, y, amount, label, collected })),
   };
 }
 
@@ -445,6 +672,18 @@ function applySaveData(data) {
     npcs = normalizeNpcLayout(data.npcs);
     saveNpcLayout();
     updateNpcEditor();
+  }
+  if (Array.isArray(data.scrapNodes)) {
+    scrapNodes = data.scrapNodes
+      .filter((node) => Number.isInteger(node?.x) && Number.isInteger(node?.y))
+      .map((node, index) => ({
+        id: typeof node.id === "string" ? node.id : `scrap-loaded-${index}`,
+        x: node.x,
+        y: node.y,
+        amount: Math.max(1, Math.min(9, Number.parseInt(node.amount ?? 1, 10) || 1)),
+        label: typeof node.label === "string" ? node.label : "零件点",
+        collected: Boolean(node.collected),
+      }));
   }
   demoComplete = Boolean(data.demoComplete);
   currentEnemy = null;
@@ -488,6 +727,7 @@ function resetDemo() {
   LEGACY_NPC_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
   map = [...defaultMap];
   npcs = cloneDefaultNpcs();
+  scrapNodes = cloneDefaultScrapNodes();
   Object.assign(player, initialPlayer);
   enemies.forEach((enemy, index) => Object.assign(enemy, initialEnemies[index]));
   demoComplete = false;
@@ -515,7 +755,8 @@ function remainingEnemyCount() {
 function updateObjectiveText() {
   if (!ui.objective) return;
   if (enemies.length === 0) {
-    ui.objective.textContent = DEV_MODE ? "地图编辑中" : "探索地图";
+    const remainingScrap = scrapNodes.filter((node) => !node.collected).length;
+    ui.objective.textContent = DEV_MODE ? `地图编辑中 / 零件点 ${remainingScrap}` : `寻找零件 ${remainingScrap}`;
     return;
   }
   if (demoComplete) {
@@ -546,6 +787,7 @@ function rememberDirection(dx, dy) {
 function move(dx, dy) {
   if (mode !== "map") return;
   rememberDirection(dx, dy);
+  if (document.body.classList.contains("panel-open") && sidePanel.dataset.active === "pilot") closePanel();
   if (mapAnim) {
     queuedMove = { dx, dy };
     return;
@@ -556,6 +798,15 @@ function move(dx, dy) {
     queuedMove = null;
     bumpAnim = { dx, dy, start: performance.now(), duration: 140 };
     addLog("装甲撞上废墟墙体，传感器一阵雪花。");
+    return;
+  }
+  const blockedNpc = blockingNpcAt(nx, ny);
+  if (blockedNpc) {
+    queuedMove = null;
+    bumpAnim = { dx, dy, start: performance.now(), duration: 120 };
+    dialogOpenNpcId = blockedNpc.id;
+    setComms(blockedNpc.speaker, blockedNpc.text, blockedNpc.portrait);
+    openPanel("pilot");
     return;
   }
 
@@ -603,6 +854,7 @@ function handleArrival() {
   }
   const npc = npcs.find((item) => item.x === nx && item.y === ny);
   if (npc) setComms(npc.speaker, npc.text, npc.portrait);
+  collectScrapNode(scrapNodeAt(nx, ny));
   updateUi();
 }
 
@@ -626,17 +878,19 @@ function endBattle(won) {
   if (won) {
     const original = enemies.find((enemy) => enemy.name === defeatedName);
     if (original) original.defeated = true;
-    const scrapReward = rand(1, 3);
+    const scrapReward = currentEnemy?.training ? 3 : rand(1, 3);
     const creditReward = rand(45, 80);
-    player.wins += 1;
+    if (!currentEnemy?.training) player.wins += 1;
     player.scrap += scrapReward;
     player.credits += creditReward;
     player.level = 1 + Math.floor(player.wins / 2);
     player.maxEn = 60 + player.level * 4;
     player.en = Math.min(player.maxEn, player.en + 24);
-    addLog(`${defeatedName} 停机，回收蓝图碎片 ${player.wins}/${enemies.length}。`);
+    addLog(currentEnemy?.training ? `${defeatedName} 停机，回收训练零件。` : `${defeatedName} 停机，回收蓝图碎片 ${player.wins}/${enemies.length}。`);
     addLog(`战利品：${creditReward} Cr，${scrapReward} 零件。`);
-    if (remainingEnemyCount() === 0) {
+    if (currentEnemy?.training) {
+      setComms("驾驶员 洛辰", "训练机停机。带着零件去找老师交付。", 0);
+    } else if (remainingEnemyCount() === 0) {
       setComms("驾驶员 洛辰", "四个信号源都熄灭了。回基地交付蓝图碎片。", 0);
     } else {
       setComms("驾驶员 洛辰", `目标清除。还有 ${remainingEnemyCount()} 台敌机在外圈活动。`, 0);
@@ -701,15 +955,16 @@ function playerAction(action) {
   const damage = rand(...weapon.damage) + player.level * 2;
   currentEnemy.hp = Math.max(0, currentEnemy.hp - damage);
   const kind = action === "missile" ? "missile" : action === "blade" ? "slash" : player.weapon === "rail" ? "rail" : "muzzle";
-  startBattleAnim({ actor: "player", target: "enemy", kind, text: `-${damage}`, x: 404, y: 64, duration: 620, shake: 8 });
+  const duration = kind === "slash" ? 900 : kind === "missile" ? 760 : 640;
+  startBattleAnim({ actor: "player", target: "enemy", kind, text: `-${damage}`, x: 404, y: 64, duration, shake: 8 });
   addLog(`${weapon.log} 造成 ${damage} 伤害。`);
   updateUi();
 
   if (currentEnemy.hp <= 0) {
-    setTimeout(() => endBattle(true), 740);
+    setTimeout(() => endBattle(true), duration + 140);
     return;
   }
-  setTimeout(enemyTurn, 700);
+  setTimeout(enemyTurn, duration + 120);
 }
 
 function enemyTurn() {
@@ -750,6 +1005,16 @@ function startBattleAnim({ actor, target = "", kind, text, x, y, duration = 560,
   };
 }
 
+const battleLayout = {
+  topPanel: { x: 34, y: 10, w: 300, h: 64 },
+  bottomPanel: { x: 318, y: 286, w: 300, h: 64 },
+  playerLane: { y: 78, floor: 176 },
+  enemyLane: { y: 202, floor: 284 },
+  playerHome: { x: 128, y: 182 },
+  enemyHome: { x: 500, y: 274 },
+  unitSize: 106,
+};
+
 function showHangar() {
   mode = "hangar";
   closePanel();
@@ -785,10 +1050,23 @@ function openPanel(panel) {
 
 function closePanel() {
   document.body.classList.remove("panel-open");
+  dialogOpenNpcId = null;
 }
 
 function launchBattle() {
-  const target = enemies.find((enemy) => !enemy.defeated);
+  const target = enemies.find((enemy) => !enemy.defeated) ?? {
+    x: -1,
+    y: -1,
+    name: "失控训练机",
+    hp: 86,
+    maxHp: 86,
+    en: 36,
+    atk: 11,
+    defense: 10,
+    sprite: 4,
+    defeated: false,
+    training: true,
+  };
   if (!target) {
     setComms("基地指挥官", "敌机信号已经清空。返回基地交付蓝图碎片。", 1);
     addLog("没有可出击目标。");
@@ -891,6 +1169,40 @@ function drawBattleMech(ctx, x, y, size, sprite, facing = 1) {
   ctx.restore();
 }
 
+function drawAnchoredBattleMech(ctx, x, footY, size, sprite, facing = 1, flash = false) {
+  if (assets.battleMechs.complete && assets.battleMechs.naturalWidth) {
+    const col = sprite % 4;
+    const row = Math.floor(sprite / 4);
+    const drawW = size;
+    const drawH = size;
+    const dx = Math.round(-drawW / 2);
+    const dy = Math.round(-drawH + 9);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(Math.round(x), Math.round(footY));
+    ctx.scale(facing, 1);
+    ctx.drawImage(
+      assets.battleMechs,
+      col * 256,
+      row * 256,
+      256,
+      256,
+      dx,
+      dy,
+      drawW,
+      drawH
+    );
+    if (flash) {
+      ctx.globalCompositeOperation = "source-atop";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.62)";
+      ctx.fillRect(dx, dy, drawW, drawH);
+    }
+    ctx.restore();
+    return;
+  }
+  drawFallbackMech(ctx, x, footY - size * 0.35, size * 0.72, facing);
+}
+
 function drawCharacter(ctx, x, y, sprite, w = 28, h = 28, facing = 1) {
   ctx.save();
   ctx.translate(x, y);
@@ -991,6 +1303,30 @@ function drawWreckMarker(ctx, x, y) {
   ctx.restore();
 }
 
+function drawScrapNode(ctx, x, y, node, now) {
+  const glow = 0.55 + Math.sin(now / 260 + node.x) * 0.22;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.34)";
+  ctx.beginPath();
+  ctx.ellipse(0, 15, 12, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = `rgba(88, 199, 255, ${glow})`;
+  ctx.fillRect(-8, -10, 16, 12);
+  ctx.fillStyle = "#f0c84b";
+  ctx.fillRect(-6, -8, 12, 3);
+  ctx.fillStyle = "#1d2c42";
+  ctx.fillRect(-7, -4, 14, 7);
+  ctx.fillStyle = "#58c7ff";
+  ctx.fillRect(-3, -2, 6, 3);
+  ctx.strokeStyle = "#08101d";
+  ctx.strokeRect(-8.5, -10.5, 17, 13);
+  ctx.fillStyle = "rgba(255, 239, 152, 0.9)";
+  ctx.font = "10px Microsoft YaHei, sans-serif";
+  ctx.fillText(`+${node.amount}`, 7, -14);
+  ctx.restore();
+}
+
 function drawActorShadow(ctx, x, y, w = 24, h = 7) {
   ctx.save();
   ctx.fillStyle = "rgba(0, 0, 0, 0.38)";
@@ -1032,7 +1368,16 @@ function drawMap() {
   }
   if (showCollisionDebug) drawCollisionOverlay(camera);
   if (showNpcDebug) drawNpcOverlay(camera);
+  if (showScrapDebug) drawScrapOverlay(camera);
   const actors = [];
+  scrapNodes.filter((node) => !node.collected).forEach((node) => {
+    const x = node.x * TILE + TILE / 2 - camera.x;
+    const y = node.y * TILE + TILE / 2 + 4 - camera.y;
+    actors.push({
+      y,
+      draw: () => drawScrapNode(mapCtx, x, y, node, now),
+    });
+  });
   if (!DEV_MODE || showEnemyMarkers) enemies.forEach((enemy) => {
     const x = enemy.x * TILE + TILE / 2 - camera.x;
     const y = enemy.y * TILE + TILE / 2 + 4 - camera.y;
@@ -1072,12 +1417,14 @@ function drawMap() {
   mapCtx.fillStyle = "rgba(16, 19, 24, 0.66)";
   const help = showNpcDebug
     ? `NPC 摆放：${npcs.length} 个 / 点击放置 / Shift 删除`
+    : showScrapDebug
+      ? `零件摆放：${scrapNodes.length} 个 / 点击放置 / Shift 删除`
     : showCollisionDebug
       ? "碰撞编辑：点击可走 / Shift 不可走 / R 重置"
       : DEV_MODE
-        ? `WASD 移动 / N 摆 NPC(${npcs.length}) / C 碰撞`
-        : "WASD 移动 / 接触敌机";
-  const hintWidth = showNpcDebug ? 330 : showCollisionDebug ? 330 : DEV_MODE ? 270 : 156;
+        ? `WASD 移动 / E 对话或回收 / N NPC / M 零件 / C 碰撞`
+        : "WASD 移动 / E 对话或回收";
+  const hintWidth = showNpcDebug ? 330 : showScrapDebug ? 330 : showCollisionDebug ? 330 : DEV_MODE ? 430 : 236;
   mapCtx.fillRect(10, 10, hintWidth, 22);
   mapCtx.fillStyle = "#e6edf1";
   mapCtx.font = "12px Microsoft YaHei, sans-serif";
@@ -1123,6 +1470,24 @@ function drawNpcOverlay(camera) {
     mapCtx.fillRect(px + 1, py + 1, TILE - 2, 12);
     mapCtx.fillStyle = "#e6edf1";
     mapCtx.fillText(npc.type === "teacher" ? "老师" : npc.type, px + 4, py + 2);
+  });
+  mapCtx.restore();
+}
+
+function drawScrapOverlay(camera) {
+  mapCtx.save();
+  mapCtx.font = "11px Microsoft YaHei, sans-serif";
+  mapCtx.textBaseline = "top";
+  scrapNodes.forEach((node) => {
+    const px = node.x * TILE - camera.x;
+    const py = node.y * TILE - camera.y;
+    mapCtx.strokeStyle = node.collected ? "rgba(120, 120, 120, 0.75)" : "#ffef98";
+    mapCtx.lineWidth = 2;
+    mapCtx.strokeRect(px + 3.5, py + 3.5, TILE - 7, TILE - 7);
+    mapCtx.fillStyle = node.collected ? "rgba(36, 36, 36, 0.78)" : "rgba(8, 16, 29, 0.84)";
+    mapCtx.fillRect(px + 1, py + 1, TILE - 2, 12);
+    mapCtx.fillStyle = node.collected ? "#b8b8b8" : "#ffef98";
+    mapCtx.fillText(`+${node.amount}`, px + 5, py + 2);
   });
   mapCtx.restore();
 }
@@ -1223,28 +1588,141 @@ function drawBattle() {
   const now = performance.now();
   battleCtx.clearRect(0, 0, battleCanvas.width, battleCanvas.height);
   const shake = battleFx.shake > 0 ? rand(-battleFx.shake, battleFx.shake) : 0;
-  if (assets.battleBg.complete && assets.battleBg.naturalWidth) {
-    battleCtx.drawImage(assets.battleBg, 0, 0, battleCanvas.width, battleCanvas.height);
-  } else {
-    battleCtx.fillStyle = "#10161d";
-    battleCtx.fillRect(0, 0, battleCanvas.width, battleCanvas.height);
-    battleCtx.fillStyle = "#6f4328";
-    battleCtx.fillRect(0, 196, battleCanvas.width, 88);
+  drawBattleStage(battleCtx);
+  drawBattleStatusPanel(battleCtx, battleLayout.topPanel, {
+    name: "RX-17 游隼",
+    level: player.level,
+    hp: player.hp,
+    maxHp: player.maxHp,
+    en: player.en,
+    maxEn: player.maxEn,
+    atk: player.atk + player.level * 2,
+    defense: player.defense,
+    weapon: weapons[player.weapon].label,
+    status: player.guard ? "防御中" : "正常",
+  });
+  if (currentEnemy) {
+    drawBattleStatusPanel(battleCtx, battleLayout.bottomPanel, {
+      name: currentEnemy.name,
+      level: currentEnemy.level ?? 1,
+      hp: currentEnemy.hp,
+      maxHp: currentEnemy.maxHp,
+      en: currentEnemy.en,
+      maxEn: currentEnemy.maxEn ?? 60,
+      atk: currentEnemy.atk,
+      defense: currentEnemy.defense ?? 8,
+      weapon: currentEnemy.training ? "训练武装" : "敌机武装",
+      status: battleAnim?.target === "enemy" ? "受击" : "正常",
+    });
   }
   const pose = getBattlePose(now);
-  drawBattleUnit(battleCtx, 168 + shake + pose.playerX, 142 + pose.playerY, 190, getPlayerMechaFrame(), 1, pose.playerAlpha);
-  if (currentEnemy) drawBattleUnit(battleCtx, 474 - shake + pose.enemyX, 142 + pose.enemyY, 178, getEnemyMechaFrame(), -1, pose.enemyAlpha);
+  drawBattleUnit(battleCtx, pose.playerX + shake, pose.playerY, battleLayout.unitSize, getPlayerMechaFrame(), 1, pose.playerAlpha, pose.playerFlash);
+  if (currentEnemy) drawBattleUnit(battleCtx, pose.enemyX - shake, pose.enemyY, battleLayout.unitSize, getEnemyMechaFrame(), -1, pose.enemyAlpha, pose.enemyFlash);
   if (battleAnim) {
     const progress = Math.min(1, (now - battleAnim.start) / battleAnim.duration);
-    const float = Math.sin(progress * Math.PI) * 10 + progress * 14;
-    const pulse = 78 + Math.sin(progress * Math.PI) * 18;
-    drawEffect(battleCtx, battleAnim.kind, battleAnim.x, battleAnim.y - float * 0.35, pulse, battleAnim.x > 300 ? 1 : -1);
+    drawBattleActionEffect(battleCtx, battleAnim, progress);
+    const float = Math.sin(progress * Math.PI) * 8 + progress * 18;
+    const textPoint = battleDamagePoint(battleAnim, progress);
     battleCtx.fillStyle = "#ffef98";
-    battleCtx.font = "24px Segoe UI, sans-serif";
-    battleCtx.fillText(battleAnim.text, battleAnim.x + 34, battleAnim.y - 8 - float);
+    battleCtx.strokeStyle = "#241510";
+    battleCtx.lineWidth = 3;
+    battleCtx.font = "bold 22px Segoe UI, sans-serif";
+    battleCtx.strokeText(battleAnim.text, textPoint.x, textPoint.y - float);
+    battleCtx.fillText(battleAnim.text, textPoint.x, textPoint.y - float);
     if (progress >= 1) battleAnim = null;
   }
   battleFx.shake = Math.max(0, battleFx.shake - 1);
+}
+
+function drawBattleStage(ctx) {
+  if (assets.battleField.complete && assets.battleField.naturalWidth) {
+    ctx.drawImage(assets.battleField, 0, 0, battleCanvas.width, battleCanvas.height);
+    ctx.fillStyle = "rgba(3, 8, 18, 0.2)";
+    ctx.fillRect(0, 0, battleCanvas.width, battleCanvas.height);
+    drawBattleLaneFocus(ctx);
+    return;
+  }
+  ctx.fillStyle = "#253848";
+  ctx.fillRect(0, 0, battleCanvas.width, battleCanvas.height);
+  ctx.fillStyle = "#384c5d";
+  ctx.fillRect(0, 70, battleCanvas.width, 92);
+  ctx.fillRect(0, 196, battleCanvas.width, 92);
+  ctx.fillStyle = "#07101a";
+  ctx.fillRect(0, 176, battleCanvas.width, 12);
+  drawBattleLaneFocus(ctx);
+}
+
+function drawBattleLaneFocus(ctx) {
+  ctx.save();
+  ctx.fillStyle = "rgba(255, 255, 255, 0.035)";
+  ctx.fillRect(0, battleLayout.playerLane.y + 18, battleCanvas.width, 64);
+  ctx.fillRect(0, battleLayout.enemyLane.y + 6, battleCanvas.width, 70);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+  ctx.fillRect(0, 0, battleCanvas.width, battleLayout.topPanel.y + battleLayout.topPanel.h + 2);
+  ctx.fillRect(0, battleLayout.bottomPanel.y + battleLayout.bottomPanel.h + 1, battleCanvas.width, battleCanvas.height);
+  ctx.strokeStyle = "rgba(88, 199, 255, 0.35)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, battleLayout.playerHome.y - 3);
+  ctx.lineTo(battleCanvas.width, battleLayout.playerHome.y - 3);
+  ctx.moveTo(0, battleLayout.enemyHome.y - 3);
+  ctx.lineTo(battleCanvas.width, battleLayout.enemyHome.y - 3);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawBattleStatusPanel(ctx, box, unit) {
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.34)";
+  ctx.fillRect(box.x + 4, box.y + 4, box.w, box.h);
+  ctx.fillStyle = "rgba(57, 64, 196, 0.9)";
+  ctx.fillRect(box.x, box.y, box.w, box.h);
+  ctx.fillStyle = "rgba(104, 128, 255, 0.22)";
+  ctx.fillRect(box.x + 5, box.y + 5, box.w - 10, 10);
+  ctx.strokeStyle = "#eef4ff";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+  ctx.strokeStyle = "#252b79";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(box.x + 4.5, box.y + 4.5, box.w - 9, box.h - 9);
+
+  ctx.fillStyle = "#fff4a0";
+  ctx.font = "bold 14px Microsoft YaHei, sans-serif";
+  drawBattleText(ctx, `${unit.name}  Lv ${unit.level}`, box.x + 10, box.y + 17, "#fff4a0");
+
+  ctx.font = "bold 11px Microsoft YaHei, sans-serif";
+  drawBattleText(ctx, `装甲 ${unit.hp}/${unit.maxHp}`, box.x + 10, box.y + 34, "#ffffff");
+  drawMiniBar(ctx, box.x + 92, box.y + 26, 86, 7, unit.hp / unit.maxHp, "#ff6e4a");
+  drawBattleText(ctx, `能量 ${unit.en}/${unit.maxEn}`, box.x + 10, box.y + 48, "#bcd7ff");
+  drawMiniBar(ctx, box.x + 92, box.y + 40, 86, 7, unit.en / unit.maxEn, "#58c7ff");
+  drawBattleText(ctx, `攻 ${unit.atk}`, box.x + 194, box.y + 34, "#eef4ff");
+  drawBattleText(ctx, `防 ${unit.defense}`, box.x + 244, box.y + 34, "#eef4ff");
+  drawBattleText(ctx, `状态 ${unit.status}`, box.x + 194, box.y + 48, unit.status === "正常" ? "#d9f7ff" : "#ffef98");
+  drawBattleText(ctx, `武器 ${unit.weapon}`, box.x + 10, box.y + 60, "#ffffff");
+  ctx.restore();
+}
+
+function drawBattleText(ctx, text, x, y, color) {
+  const px = Math.round(x);
+  const py = Math.round(y);
+  ctx.fillStyle = "rgba(15, 18, 52, 0.88)";
+  ctx.fillText(text, px + 1, py + 1);
+  ctx.fillStyle = color;
+  ctx.fillText(text, px, py);
+}
+
+function drawMiniBar(ctx, x, y, w, h, ratio, color) {
+  const value = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0));
+  ctx.fillStyle = "#070b18";
+  ctx.fillRect(Math.round(x), Math.round(y), w, h);
+  ctx.strokeStyle = "#111f48";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, w - 1, h - 1);
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.round(x + 1), Math.round(y + 1), Math.max(0, Math.round((w - 2) * value)), h - 2);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.34)";
+  ctx.fillRect(Math.round(x + 1), Math.round(y + 1), Math.max(0, Math.round((w - 2) * value)), 1);
 }
 
 function getPlayerMechaFrame() {
@@ -1256,44 +1734,144 @@ function getPlayerMechaFrame() {
 }
 
 function getEnemyMechaFrame() {
-  if (!battleAnim) return 1;
+  const idleFrame = currentEnemy?.sprite ?? 1;
+  if (!battleAnim) return idleFrame;
   if (battleAnim.target === "enemy") return 5;
   if (battleAnim.actor === "enemy") return battleAnim.kind === "explosion" ? 3 : 4;
-  return 1;
+  return idleFrame;
 }
 
 function getBattlePose(now) {
-  const idle = Math.sin(now / 360) * 2;
+  const idle = Math.sin(now / 420) * 1.25;
   const pose = {
-    playerX: 0,
-    playerY: idle,
-    enemyX: 0,
-    enemyY: -idle,
+    playerX: battleLayout.playerHome.x,
+    playerY: battleLayout.playerHome.y + idle,
+    enemyX: battleLayout.enemyHome.x,
+    enemyY: battleLayout.enemyHome.y - idle,
     playerAlpha: 1,
     enemyAlpha: 1,
+    playerFlash: false,
+    enemyFlash: false,
   };
   if (!battleAnim) return pose;
 
   const t = Math.min(1, (now - battleAnim.start) / battleAnim.duration);
-  const strike = Math.sin(t * Math.PI);
-  const hurtFlash = Math.floor(t * 18) % 2 === 0 ? 0.45 : 1;
-  if (battleAnim.actor === "player") pose.playerX += strike * 24;
-  if (battleAnim.actor === "enemy") pose.enemyX -= strike * 20;
+  if (battleAnim.actor === "player" && battleAnim.kind === "slash") {
+    if (t < 0.16) {
+      pose.playerX = battleLayout.playerHome.x - Math.sin((t / 0.16) * Math.PI) * 10;
+      pose.playerY = battleLayout.playerHome.y + idle;
+    } else if (t < 0.44) {
+      pose.playerX = lerp(battleLayout.playerHome.x + 4, 536, easeOut((t - 0.16) / 0.28));
+      pose.playerY = battleLayout.playerHome.y - Math.sin(((t - 0.16) / 0.28) * Math.PI) * 5;
+    } else if (t < 0.72) {
+      pose.playerX = lerp(126, battleLayout.enemyHome.x - 18, easeOut((t - 0.44) / 0.28));
+      pose.playerY = battleLayout.enemyHome.y;
+    } else {
+      pose.playerX = lerp(battleLayout.enemyHome.x - 18, battleLayout.playerHome.x, easeInOut((t - 0.72) / 0.28));
+      pose.playerY = lerp(battleLayout.enemyHome.y, battleLayout.playerHome.y, easeInOut((t - 0.72) / 0.28));
+    }
+  } else if (battleAnim.actor === "player" && ["muzzle", "missile", "rail"].includes(battleAnim.kind)) {
+    pose.playerX += Math.sin(t * Math.PI) * 7;
+  } else if (battleAnim.actor === "enemy") {
+    pose.enemyX -= Math.sin(t * Math.PI) * 8;
+  }
   if (battleAnim.target === "enemy") {
-    pose.enemyX += Math.sin(t * Math.PI * 8) * 5;
-    pose.enemyAlpha = t < 0.75 ? hurtFlash : 1;
+    const hit = t > 0.56 && t < 0.86;
+    pose.enemyX += hit ? Math.sin(t * Math.PI * 10) * 3 : 0;
+    pose.enemyFlash = hit && Math.floor(t * 26) % 2 === 0;
   }
   if (battleAnim.target === "player") {
-    pose.playerX += Math.sin(t * Math.PI * 8) * 5;
-    pose.playerAlpha = t < 0.75 ? hurtFlash : 1;
+    const hit = t > 0.45 && t < 0.78;
+    pose.playerX += hit ? Math.sin(t * Math.PI * 10) * 3 : 0;
+    pose.playerFlash = hit && Math.floor(t * 26) % 2 === 0;
   }
   return pose;
 }
 
-function drawBattleUnit(ctx, x, y, size, sprite, direction, alpha) {
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function easeInOut(t) {
+  return t * t * (3 - 2 * t);
+}
+
+function easeOut(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
+function drawBattleActionEffect(ctx, anim, progress) {
+  if (anim.kind === "slash") {
+    if (progress > 0.18 && progress < 0.72) {
+      drawBattleAfterimage(ctx, progress);
+    }
+    const x = lerp(150, battleLayout.enemyHome.x - 26, easeOut(Math.min(1, Math.max(0, (progress - 0.46) / 0.28))));
+    const y = battleLayout.enemyHome.y - battleLayout.unitSize * 0.46;
+    if (progress > 0.54 && progress < 0.86) {
+      drawEffect(ctx, "slash", x, y, 86, 1);
+      ctx.strokeStyle = "rgba(88, 255, 255, 0.78)";
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(x - 42, y - 28);
+      ctx.lineTo(x + 38, y + 24);
+      ctx.stroke();
+    }
+    return;
+  }
+  if (["muzzle", "rail", "missile"].includes(anim.kind)) {
+    const start = { x: battleLayout.playerHome.x + 48, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.44 };
+    const end = { x: battleLayout.enemyHome.x - 52, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.46 };
+    const fireT = Math.min(1, Math.max(0, (progress - 0.12) / 0.72));
+    const x = lerp(start.x, end.x, easeOut(fireT));
+    const y = lerp(start.y, end.y, easeOut(fireT));
+    ctx.save();
+    if (progress < 0.2) drawEffect(ctx, "hit", start.x + 4, start.y, 34 + progress * 80, 1);
+    ctx.strokeStyle = anim.kind === "rail" ? "#58c7ff" : "#ffef98";
+    ctx.lineWidth = anim.kind === "rail" ? 5 : 3;
+    ctx.beginPath();
+    ctx.moveTo(Math.max(start.x, x - 54), y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.fillStyle = anim.kind === "missile" ? "#ff6e4a" : "#ffffff";
+    if (progress > 0.1 && progress < 0.92) ctx.fillRect(x - 8, y - 3, 16, 6);
+    ctx.restore();
+    if (progress > 0.72) drawEffect(ctx, anim.kind === "missile" ? "explosion" : "hit", end.x + 18, end.y + 8, 78, 1);
+    return;
+  }
+  const pulse = 72 + Math.sin(progress * Math.PI) * 16;
+  drawEffect(ctx, anim.kind, anim.x, anim.y, pulse, anim.x > 300 ? 1 : -1);
+}
+
+function battleDamagePoint(anim, progress) {
+  if (anim.target === "enemy") return { x: battleLayout.enemyHome.x - 24, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.78 };
+  if (anim.target === "player") return { x: battleLayout.playerHome.x + 18, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.78 };
+  return { x: anim.x + 28, y: anim.y - 8 };
+}
+
+function drawBattleAfterimage(ctx, progress) {
+  const ghostT = Math.min(1, Math.max(0, (progress - 0.18) / 0.42));
+  const x = lerp(battleLayout.playerHome.x, battleLayout.enemyHome.x - 26, ghostT);
+  const y = progress < 0.46 ? battleLayout.playerHome.y : battleLayout.enemyHome.y;
+  ctx.save();
+  ctx.globalAlpha = 0.18 * (1 - ghostT);
+  drawAnchoredBattleMech(ctx, x - 24, y, battleLayout.unitSize, getPlayerMechaFrame(), 1, true);
+  ctx.restore();
+}
+
+function drawBattleUnit(ctx, x, footY, size, sprite, direction, alpha, flash = false) {
   ctx.save();
   ctx.globalAlpha = alpha;
-  drawBattleMech(ctx, x, y, size, sprite, direction);
+  drawBattleShadow(ctx, x, footY, size);
+  drawAnchoredBattleMech(ctx, x, footY, size, sprite, direction, flash);
+  ctx.restore();
+}
+
+function drawBattleShadow(ctx, x, footY, size) {
+  ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.34)";
+  ctx.beginPath();
+  ctx.ellipse(x, footY - 5, size * 0.34, size * 0.09, 0, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
@@ -1353,31 +1931,67 @@ window.addEventListener("blur", () => {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closePanel();
+  if (!isUiInputTarget(event.target) && ["e", "enter", " "].includes(event.key.toLowerCase())) {
+    if (interactWithNpc()) event.preventDefault();
+  }
   if (DEV_MODE && event.key.toLowerCase() === "c") {
     showCollisionDebug = !showCollisionDebug;
-    if (showCollisionDebug) showNpcDebug = false;
+    if (showCollisionDebug) {
+      showNpcDebug = false;
+      showScrapDebug = false;
+    }
     updateNpcEditor();
     addLog(showCollisionDebug ? "碰撞调试已开启。" : "碰撞调试已关闭。");
   }
   if (DEV_MODE && event.key.toLowerCase() === "n") {
     showNpcDebug = !showNpcDebug;
-    if (showNpcDebug) showCollisionDebug = false;
+    if (showNpcDebug) {
+      showCollisionDebug = false;
+      showScrapDebug = false;
+    }
     if (!showNpcDebug) npcEraseMode = false;
     updateNpcEditor();
     addLog(showNpcDebug ? "NPC 摆放已开启。" : "NPC 摆放已关闭。");
+  }
+  if (DEV_MODE && event.key.toLowerCase() === "m") {
+    showScrapDebug = !showScrapDebug;
+    if (showScrapDebug) {
+      showCollisionDebug = false;
+      showNpcDebug = false;
+    }
+    if (!showScrapDebug) scrapEraseMode = false;
+    updateNpcEditor();
+    addLog(showScrapDebug ? "零件摆放已开启。" : "零件摆放已关闭。");
   }
   if (DEV_MODE && showCollisionDebug && event.key.toLowerCase() === "r") resetCollisionMap();
 });
 
 mapCanvas.addEventListener("pointerdown", (event) => {
-  if (!DEV_MODE || mode !== "map" || (!showCollisionDebug && !showNpcDebug)) return;
+  if (mode === "map" && (!DEV_MODE || (!showCollisionDebug && !showNpcDebug && !showScrapDebug))) {
+    if (document.body.classList.contains("panel-open") && sidePanel.dataset.active === "pilot") closePanel();
+    return;
+  }
+  if (!DEV_MODE || mode !== "map" || (!showCollisionDebug && !showNpcDebug && !showScrapDebug)) return;
   event.preventDefault();
   const { x, y } = getMapTileFromPointer(event);
+  if (showScrapDebug) {
+    if (event.shiftKey || scrapEraseMode) {
+      removeScrapNodeAt(x, y);
+    } else {
+      placeScrapNode(x, y);
+    }
+    return;
+  }
   if (showNpcDebug) {
     if (event.shiftKey || npcEraseMode) {
       removeNpcAt(x, y);
     } else {
-      placeNpcInstance(x, y);
+      const existingNpc = npcAt(x, y);
+      if (existingNpc && !event.ctrlKey) {
+        selectNpcInstance(existingNpc);
+      } else {
+        placeNpcInstance(x, y);
+      }
     }
     return;
   }
@@ -1436,22 +2050,45 @@ document.querySelectorAll("[data-dev-action]").forEach((button) => {
     const action = button.dataset.devAction;
     if (action === "collision-mode") {
       showCollisionDebug = !showCollisionDebug;
-      if (showCollisionDebug) showNpcDebug = false;
+      if (showCollisionDebug) {
+        showNpcDebug = false;
+        showScrapDebug = false;
+      }
       addLog(showCollisionDebug ? "碰撞编辑已开启。" : "碰撞编辑已关闭。");
     }
     if (action === "npc-mode") {
       showNpcDebug = !showNpcDebug;
-      if (showNpcDebug) showCollisionDebug = false;
+      if (showNpcDebug) {
+        showCollisionDebug = false;
+        showScrapDebug = false;
+      }
       if (!showNpcDebug) npcEraseMode = false;
       addLog(showNpcDebug ? "NPC 摆放已开启。" : "NPC 摆放已关闭。");
+    }
+    if (action === "scrap-mode") {
+      showScrapDebug = !showScrapDebug;
+      if (showScrapDebug) {
+        showCollisionDebug = false;
+        showNpcDebug = false;
+      }
+      if (!showScrapDebug) scrapEraseMode = false;
+      addLog(showScrapDebug ? "零件摆放已开启。" : "零件摆放已关闭。");
     }
     if (action === "collision-reset") resetCollisionMap();
     if (action === "npc-erase-mode") {
       npcEraseMode = !npcEraseMode;
       addLog(npcEraseMode ? "NPC 擦除已开启。" : "NPC 擦除已关闭。");
     }
+    if (action === "npc-preview") previewSelectedNpcText();
+    if (action === "npc-save-text") saveSelectedNpcText();
     if (action === "npc-clear") clearNpcLayout();
     if (action === "npc-reset") resetNpcLayout();
+    if (action === "scrap-erase-mode") {
+      scrapEraseMode = !scrapEraseMode;
+      addLog(scrapEraseMode ? "零件擦除已开启。" : "零件擦除已关闭。");
+    }
+    if (action === "scrap-clear") clearScrapNodes();
+    if (action === "scrap-reset") resetScrapNodes();
     updateNpcEditor();
   });
 });
