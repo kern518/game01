@@ -32,6 +32,7 @@
             <button data-screen="hangar">机库</button>
           </nav>
         </div>
+        <div id="guideLine" class="guide-line">WASD / 方向键移动，靠近 NPC 按 E 或点击交互。</div>
 
         <div class="screen-wrap">
           <div id="hangarLayer" class="hangar-layer" aria-label="机库界面">
@@ -46,7 +47,7 @@
               <canvas id="hangarMech" width="240" height="180" aria-label="当前机甲"></canvas>
               <div class="mission-card">
                 <b>任务</b>
-                <p>旧城区外缘出现四台失控机甲。确认蓝图碎片位置，回收核心数据。</p>
+                <p>旧城区训练机失控。找老师确认任务，出击回收零件，再返回交付完成试作强化。</p>
               </div>
               <div class="hangar-actions">
                 <button data-screen="battle">出击</button>
@@ -148,6 +149,37 @@
               <button data-action="guard">防御</button>
               <button data-action="repair">修理</button>
             </div>
+            <div id="battleResult" class="battle-result hidden" role="dialog" aria-live="assertive">
+              <div class="battle-result-card">
+                <strong id="battleResultTitle">战斗结算</strong>
+                <ul id="battleResultLines"></ul>
+                <p id="battleResultNext">返回地图继续任务。</p>
+                <button type="button" data-battle-continue>返回地图</button>
+              </div>
+            </div>
+          </div>
+          <div id="dialogBox" class="dialog-box hidden" aria-live="polite">
+            <div class="dialog-portrait">
+              <canvas id="dialogPortrait" width="64" height="64" aria-label="对话头像"></canvas>
+            </div>
+            <div class="dialog-content">
+              <strong id="dialogSpeaker">驾驶员 洛辰</strong>
+              <p id="dialogText">游隼上线，等待出击指令。</p>
+              <span>按 E / 空格关闭</span>
+            </div>
+            <button type="button" data-dialog-close aria-label="关闭对话">×</button>
+          </div>
+          <div id="demoCompleteModal" class="demo-complete hidden" role="dialog" aria-live="assertive">
+            <div class="demo-complete-card">
+              <strong>Demo 完成</strong>
+              <p>训练机停机，零件交付完成。RX-17 游隼获得试作强化。</p>
+              <ul>
+                <li>装甲上限 +10</li>
+                <li>攻击 +2</li>
+                <li>主线闭环已完成</li>
+              </ul>
+              <button type="button" data-demo-complete-close>查看机体状态</button>
+            </div>
           </div>
         </div>
       </section>
@@ -189,10 +221,39 @@
             <button class="slot" data-equip="rail">磁轨炮</button>
             <button class="slot" data-equip="repair">维修核心</button>
           </div>
+          <div class="upgrade-panel">
+            <div class="upgrade-title">
+              <strong>机甲改装</strong>
+              <span>消耗零件强化 RX-17</span>
+            </div>
+            <button class="upgrade-row" type="button" data-upgrade="armor">
+              <span>
+                <b>装甲强化</b>
+                <small>上限 +10，立即修满</small>
+              </span>
+              <em>2 零件</em>
+            </button>
+            <button class="upgrade-row" type="button" data-upgrade="attack">
+              <span>
+                <b>火控调校</b>
+                <small>攻击 +2</small>
+              </span>
+              <em>2 零件</em>
+            </button>
+            <button class="upgrade-row" type="button" data-upgrade="energy">
+              <span>
+                <b>能量扩容</b>
+                <small>上限 +6，立即充满</small>
+              </span>
+              <em>2 零件</em>
+            </button>
+            <p id="upgradeHint">战斗胜利或地图回收可获得零件。</p>
+          </div>
         </section>
 
         <section class="status-block log-block" data-panel-section="log">
           <h2>通讯</h2>
+          <div id="saveMeta" class="save-meta">阶段：未保存</div>
           <ol id="log"></ol>
         </section>
       </aside>
@@ -207,6 +268,6 @@
       <button data-move="right">▶</button>
     </div>
 
-    <script src="game.js?v=battle-field-ui-v19"></script>
+    <script src="game.js?v=mech-upgrade-v23"></script>
   </body>
 </html>

@@ -11,6 +11,8 @@ const hangarMechCtx = hangarMechCanvas.getContext("2d");
 const logEl = document.querySelector("#log");
 const portraitCanvas = document.querySelector("#portrait");
 const portraitCtx = portraitCanvas.getContext("2d");
+const dialogPortraitCanvas = document.querySelector("#dialogPortrait");
+const dialogPortraitCtx = dialogPortraitCanvas.getContext("2d");
 
 const ui = {
   credits: document.querySelector("#credits"),
@@ -26,6 +28,17 @@ const ui = {
   enemyName: document.querySelector("#enemyName"),
   enemyHp: document.querySelector("#enemyHp"),
   enemyEn: document.querySelector("#enemyEn"),
+  battleResult: document.querySelector("#battleResult"),
+  battleResultTitle: document.querySelector("#battleResultTitle"),
+  battleResultLines: document.querySelector("#battleResultLines"),
+  battleResultNext: document.querySelector("#battleResultNext"),
+  dialogBox: document.querySelector("#dialogBox"),
+  dialogSpeaker: document.querySelector("#dialogSpeaker"),
+  dialogText: document.querySelector("#dialogText"),
+  demoCompleteModal: document.querySelector("#demoCompleteModal"),
+  upgradeHint: document.querySelector("#upgradeHint"),
+  saveMeta: document.querySelector("#saveMeta"),
+  guideLine: document.querySelector("#guideLine"),
   speaker: document.querySelector("#speaker"),
   speech: document.querySelector("#speech"),
   objective: document.querySelector("#objective"),
@@ -91,6 +104,7 @@ const LEGACY_SAVE_STORAGE_KEYS = ["mechaStorm.demoSave.v1", "mechaStorm.demoSave
 const STORAGE_MIGRATION_KEY = "mechaStorm.storageMigration.v3";
 const LEGACY_STORAGE_MIGRATION_KEYS = ["mechaStorm.storageMigration.v2"];
 const DEV_MODE = new URLSearchParams(window.location.search).has("dev");
+document.body.classList.toggle("dev-mode", DEV_MODE);
 const BASE_COORD = { x: 3, y: 5 };
 const defaultMap = [
   "############################",
@@ -136,6 +150,47 @@ const defaultScrapNodes = [
 ];
 let scrapNodes = cloneDefaultScrapNodes();
 
+const trainingEnemies = [
+  {
+    id: "training-scout",
+    name: "失控训练机",
+    hp: 86,
+    maxHp: 86,
+    en: 36,
+    atk: 11,
+    defense: 10,
+    sprite: 4,
+    scrapReward: 1,
+    training: true,
+  },
+  {
+    id: "training-gunner",
+    name: "失控炮击机",
+    hp: 104,
+    maxHp: 104,
+    en: 44,
+    atk: 14,
+    defense: 12,
+    sprite: 7,
+    scrapReward: 1,
+    training: true,
+  },
+  {
+    id: "training-armor",
+    name: "失控装甲机",
+    hp: 132,
+    maxHp: 132,
+    en: 38,
+    atk: 16,
+    defense: 18,
+    sprite: 8,
+    scrapReward: 1,
+    training: true,
+  },
+];
+
+const missionBattlePoint = { x: 17, y: 8 };
+
 const tileSprites = {
   ".": 0,
   "#": 1,
@@ -162,6 +217,8 @@ const player = {
   defense: 18,
   weapon: "pulse",
   guard: false,
+  status: "正常",
+  statusTurns: 0,
 };
 const initialPlayer = { ...player };
 
@@ -169,6 +226,38 @@ const weapons = {
   pulse: { label: "脉冲机炮", damage: [14, 22], energy: 0, log: "机炮弹幕压住了敌机。" },
   rail: { label: "磁轨炮", damage: [25, 35], energy: 16, log: "磁轨炮打出贯穿电弧。" },
   repair: { label: "维修核心", damage: [12, 17], energy: -4, log: "维修核心补偿了能量回路。" },
+};
+
+const upgradeOptions = {
+  armor: {
+    cost: 2,
+    label: "装甲强化",
+    apply() {
+      player.maxHp += 10;
+      player.hp = player.maxHp;
+    },
+    message: "外层装甲加焊完成，RX-17 更能扛了。",
+    log: "机甲改装：消耗 2 零件，装甲上限 +10。",
+  },
+  attack: {
+    cost: 2,
+    label: "火控调校",
+    apply() {
+      player.atk += 2;
+    },
+    message: "火控曲线重新写入，武器响应更利落了。",
+    log: "机甲改装：消耗 2 零件，攻击 +2。",
+  },
+  energy: {
+    cost: 2,
+    label: "能量扩容",
+    apply() {
+      player.maxEn += 6;
+      player.en = player.maxEn;
+    },
+    message: "能量仓扩容完成，长线战斗会舒服很多。",
+    log: "机甲改装：消耗 2 零件，能量上限 +6。",
+  },
 };
 
 let mode = "hangar";
@@ -180,6 +269,7 @@ let bumpAnim = null;
 let facing = 1;
 let battleAnim = null;
 let battleLocked = false;
+let postBattleDialog = null;
 let lastMoveDy = 0;
 let lastMoveDx = 0;
 let queuedMove = null;
@@ -195,6 +285,12 @@ let dialogOpenNpcId = null;
 let npcEraseMode = false;
 let scrapEraseMode = false;
 let demoComplete = false;
+let questStage = "briefing";
+let trainingEnemyIndex = 0;
+let lastSavedAt = null;
+let demoCompletedAt = null;
+
+ensureDemoTeacher();
 
 const panelTitles = {
   mech: "机体",
@@ -214,11 +310,58 @@ function addLog(text) {
   while (logEl.children.length > 8) logEl.lastChild.remove();
 }
 
-function setComms(speaker, text, portrait = 0) {
+function isValidQuestStage(stage) {
+  return ["briefing", "active", "report", "complete"].includes(stage);
+}
+
+function ensureDemoTeacher() {
+  if (DEV_MODE || npcs.some((npc) => npc.type === "teacher")) return;
+  npcs.push(hydrateNpcInstance({
+    id: "teacher-demo",
+    type: "teacher",
+    x: 13,
+    y: 8,
+    speaker: "老师",
+    text: "三台训练机连续失控。逐台击败它们，带回 3 个零件，我会帮你强化游隼。",
+    blocking: false,
+  }));
+}
+
+function setComms(speaker, text, portrait = 0, options = {}) {
   currentSpeaker = { speaker, text, portrait };
   ui.speaker.textContent = speaker;
   ui.speech.textContent = text;
+  if (ui.dialogSpeaker) ui.dialogSpeaker.textContent = speaker;
+  if (ui.dialogText) ui.dialogText.textContent = text;
   drawPortrait(portrait);
+  const shouldShowDialog = options.showDialog ?? speaker !== "驾驶员 洛辰";
+  if (shouldShowDialog) showDialogBox();
+}
+
+function showDialogBox() {
+  if (mode === "battle") return;
+  ui.dialogBox?.classList.remove("hidden");
+}
+
+function hideDialogBox() {
+  ui.dialogBox?.classList.add("hidden");
+}
+
+function isDialogVisible() {
+  return Boolean(ui.dialogBox && !ui.dialogBox.classList.contains("hidden"));
+}
+
+function closeDialog() {
+  hideDialogBox();
+  dialogOpenNpcId = null;
+}
+
+function showDemoCompleteModal() {
+  ui.demoCompleteModal?.classList.remove("hidden");
+}
+
+function hideDemoCompleteModal() {
+  ui.demoCompleteModal?.classList.add("hidden");
 }
 
 function isWall(x, y) {
@@ -301,6 +444,61 @@ function resetScrapNodes() {
 
 function blockingNpcAt(x, y) {
   return npcs.find((npc) => npc.blocking && npc.x === x && npc.y === y);
+}
+
+function isMissionBattleAvailable() {
+  return questStage === "active" && !demoComplete && trainingEnemyIndex < trainingEnemies.length;
+}
+
+function isNearPlayer(x, y) {
+  return Math.abs(player.x - x) + Math.abs(player.y - y) <= 1 || (player.x === x && player.y === y);
+}
+
+function missionBattlePointAt(x, y) {
+  return isMissionBattleAvailable() && missionBattlePoint.x === x && missionBattlePoint.y === y ? missionBattlePoint : null;
+}
+
+function currentTrainingEnemy() {
+  return trainingEnemies[Math.min(trainingEnemyIndex, trainingEnemies.length - 1)] ?? null;
+}
+
+function trainingProgressText() {
+  return `${Math.min(trainingEnemyIndex + 1, trainingEnemies.length)}/${trainingEnemies.length}`;
+}
+
+function questStageLabel() {
+  if (demoComplete || questStage === "complete") return "Demo 完成";
+  if (questStage === "briefing") return "待接任务";
+  if (questStage === "active") return `训练战 ${trainingProgressText()}`;
+  if (questStage === "report") return "等待交付";
+  return "进行中";
+}
+
+function formatSaveTime(value) {
+  if (!value) return "未保存";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "未知";
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function setUnitStatus(unit, status, turns = 1) {
+  if (!unit) return;
+  unit.status = status;
+  unit.statusTurns = turns;
+}
+
+function tickUnitStatus(unit) {
+  if (!unit || !unit.status || unit.status === "正常") return;
+  unit.statusTurns = Math.max(0, (unit.statusTurns ?? 1) - 1);
+  if (unit.statusTurns <= 0) {
+    unit.status = "正常";
+    unit.statusTurns = 0;
+  }
 }
 
 function loadCollisionMap() {
@@ -507,24 +705,66 @@ function collectNearbyScrap() {
   return collectScrapNode(node);
 }
 
+function interactWithMissionBattlePoint() {
+  const point = nearbyPoints().map((item) => missionBattlePointAt(item.x, item.y)).find(Boolean);
+  if (!point) return false;
+  const enemy = currentTrainingEnemy();
+  setComms("系统", `${enemy?.name ?? "敌机"} 信号锁定，游隼出击。`, 0);
+  launchBattle();
+  return true;
+}
+
 function interactWithNpc() {
   if (mode !== "map") return false;
+  if (interactWithMissionBattlePoint()) return true;
   const target = nearbyPoints().map((point) => npcAt(point.x, point.y)).find(Boolean);
   if (!target) {
     if (collectNearbyScrap()) return true;
     addLog("附近没有可交互的 NPC。");
     return false;
   }
-  if (dialogOpenNpcId === target.id && document.body.classList.contains("panel-open") && sidePanel.dataset.active === "pilot") {
-    closePanel();
+  if (dialogOpenNpcId === target.id && isDialogVisible()) {
+    closeDialog();
     return true;
   }
+  return interactWithNpcTarget(target);
+}
+
+function interactWithNpcTarget(target) {
   selectedNpcInstanceId = target.id;
   dialogOpenNpcId = target.id;
+  if (target.type === "teacher") return interactWithTeacher(target);
   setComms(target.speaker, target.text, target.portrait);
-  openPanel("pilot");
   updateNpcEditor();
   addLog(`正在对话：${target.speaker}`);
+  return true;
+}
+
+function interactWithTeacher(target) {
+  selectedNpcInstanceId = target.id;
+  dialogOpenNpcId = target.id;
+  let text = target.text;
+  if (demoComplete || questStage === "complete") {
+    text = "游隼试作数据已经稳定。这个 Demo 的主线闭环完成了。";
+  } else if (questStage === "briefing") {
+    questStage = "active";
+    text = "三台训练机连续失控。逐台击败它们，带回 3 个零件，我会帮你强化游隼。";
+    addLog("任务接取：完成三场训练战。");
+  } else if (questStage === "active") {
+    text = `先去处理第 ${trainingProgressText()} 台失控训练机。每台都能回收 1 个零件。`;
+  } else if (questStage === "report") {
+    if (player.scrap >= 3) {
+      player.scrap -= 3;
+      completeDemo();
+      text = "零件够了。我已经强化游隼的装甲和输出，试作数据闭环完成。";
+    } else {
+      text = `还差一些零件。当前 ${player.scrap}/3，继续回收后再来找我。`;
+    }
+  }
+  setComms("老师", text, target.portrait);
+  updateNpcEditor();
+  updateUi();
+  addLog("正在对话：老师");
   return true;
 }
 
@@ -649,6 +889,10 @@ function buildSaveData() {
       defeated: enemy.defeated,
     })),
     demoComplete,
+    questStage,
+    trainingEnemyIndex,
+    savedAt: lastSavedAt,
+    completedAt: demoCompletedAt,
     map,
     npcs: npcs.map(({ id, type, x, y, speaker, text, blocking }) => ({ id, type, x, y, speaker, text, blocking })),
     scrapNodes: scrapNodes.map(({ id, x, y, amount, label, collected }) => ({ id, x, y, amount, label, collected })),
@@ -686,6 +930,11 @@ function applySaveData(data) {
       }));
   }
   demoComplete = Boolean(data.demoComplete);
+  questStage = demoComplete ? "complete" : isValidQuestStage(data.questStage) ? data.questStage : "briefing";
+  trainingEnemyIndex = Math.max(0, Math.min(trainingEnemies.length, Number.parseInt(data.trainingEnemyIndex ?? 0, 10) || 0));
+  lastSavedAt = typeof data.savedAt === "string" ? data.savedAt : null;
+  demoCompletedAt = typeof data.completedAt === "string" ? data.completedAt : null;
+  ensureDemoTeacher();
   currentEnemy = null;
   battleLocked = false;
   battleAnim = null;
@@ -698,6 +947,7 @@ function applySaveData(data) {
 }
 
 function saveDemo() {
+  lastSavedAt = new Date().toISOString();
   LEGACY_SAVE_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
   localStorage.setItem(SAVE_STORAGE_KEY, JSON.stringify(buildSaveData()));
   addLog("进度已保存。");
@@ -712,6 +962,8 @@ function loadDemo() {
       return;
     }
     setComms("系统", "已读取保存进度。", 0);
+    hideBattleResult();
+    hideDemoCompleteModal();
     updateUi();
     showMap({ preserveComms: true });
   } catch {
@@ -727,13 +979,20 @@ function resetDemo() {
   LEGACY_NPC_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
   map = [...defaultMap];
   npcs = cloneDefaultNpcs();
+  ensureDemoTeacher();
   scrapNodes = cloneDefaultScrapNodes();
   Object.assign(player, initialPlayer);
   enemies.forEach((enemy, index) => Object.assign(enemy, initialEnemies[index]));
   demoComplete = false;
+  questStage = "briefing";
+  trainingEnemyIndex = 0;
+  lastSavedAt = null;
+  demoCompletedAt = null;
   currentEnemy = null;
   battleLocked = false;
   battleAnim = null;
+  hideBattleResult();
+  hideDemoCompleteModal();
   showCollisionDebug = false;
   pressedMoveKeys.clear();
   showNpcDebug = false;
@@ -754,13 +1013,31 @@ function remainingEnemyCount() {
 
 function updateObjectiveText() {
   if (!ui.objective) return;
-  if (enemies.length === 0) {
+  if (DEV_MODE) {
     const remainingScrap = scrapNodes.filter((node) => !node.collected).length;
-    ui.objective.textContent = DEV_MODE ? `地图编辑中 / 零件点 ${remainingScrap}` : `寻找零件 ${remainingScrap}`;
+    ui.objective.textContent = `地图编辑中 / 零件点 ${remainingScrap}`;
     return;
   }
-  if (demoComplete) {
+  if (demoComplete || questStage === "complete") {
     ui.objective.textContent = "Demo 完成";
+    return;
+  }
+  if (questStage === "briefing") {
+    ui.objective.textContent = "找老师接取任务";
+    return;
+  }
+  if (questStage === "active") {
+    const enemy = currentTrainingEnemy();
+    ui.objective.textContent = enemy ? `训练战 ${trainingProgressText()}：${enemy.name}` : "返回找老师交付零件";
+    return;
+  }
+  if (questStage === "report") {
+    ui.objective.textContent = `找老师交付零件 ${Math.min(player.scrap, 3)}/3`;
+    return;
+  }
+  if (enemies.length === 0) {
+    const remainingScrap = scrapNodes.filter((node) => !node.collected).length;
+    ui.objective.textContent = `寻找零件 ${remainingScrap}`;
     return;
   }
   const remaining = remainingEnemyCount();
@@ -770,11 +1047,17 @@ function updateObjectiveText() {
 function completeDemo() {
   if (demoComplete) return;
   demoComplete = true;
+  questStage = "complete";
+  demoCompletedAt = demoCompletedAt || new Date().toISOString();
   player.hp = player.maxHp;
   player.en = player.maxEn;
   player.credits += 160;
-  setComms("基地指挥官", "四块蓝图碎片已经拼合。游隼试作数据回收完成。", 1);
-  addLog("Demo 完成：蓝图回收完毕，基地开放后续整备。");
+  player.maxHp += 10;
+  player.hp = player.maxHp;
+  player.atk += 2;
+  setComms("老师", "零件交付完成。游隼装甲 +10，攻击 +2，Demo 闭环完成。", 2);
+  addLog("Demo 完成：交付零件，游隼获得试作强化。");
+  showDemoCompleteModal();
   updateUi();
 }
 
@@ -788,6 +1071,7 @@ function move(dx, dy) {
   if (mode !== "map") return;
   rememberDirection(dx, dy);
   if (document.body.classList.contains("panel-open") && sidePanel.dataset.active === "pilot") closePanel();
+  if (isDialogVisible()) closeDialog();
   if (mapAnim) {
     queuedMove = { dx, dy };
     return;
@@ -806,7 +1090,6 @@ function move(dx, dy) {
     bumpAnim = { dx, dy, start: performance.now(), duration: 120 };
     dialogOpenNpcId = blockedNpc.id;
     setComms(blockedNpc.speaker, blockedNpc.text, blockedNpc.portrait);
-    openPanel("pilot");
     return;
   }
 
@@ -834,6 +1117,10 @@ function handleArrival() {
   const ny = player.y;
   const enemy = enemyAt(nx, ny);
   if (enemy) startBattle(enemy);
+  if (missionBattlePointAt(nx, ny)) {
+    launchBattle();
+    return;
+  }
   if (tileAt(nx, ny) === "B") {
     player.hp = player.maxHp;
     player.en = player.maxEn;
@@ -845,12 +1132,11 @@ function handleArrival() {
       addLog("基地完成整备：装甲与能量已恢复。");
     }
   }
-  if (tileAt(nx, ny) === "s" && player.scrap >= 2) {
-    player.scrap -= 2;
-    player.maxHp += 10;
+  if (tileAt(nx, ny) === "s") {
     player.hp = player.maxHp;
-    setComms("机械师 阿棠", "装甲板重新焊好了，这下抗揍多了。", 2);
-    addLog("维修站消耗 2 零件，机体装甲上限 +10。");
+    player.en = player.maxEn;
+    setComms("机械师 阿棠", "维修站已整备完成。想强化机体的话，打开装备菜单进行机甲改装。", 2);
+    addLog("维修站完成整备：装甲与能量已恢复。");
   }
   const npc = npcs.find((item) => item.x === nx && item.y === ny);
   if (npc) setComms(npc.speaker, npc.text, npc.portrait);
@@ -863,9 +1149,14 @@ function startBattle(enemy) {
   mapAnim = null;
   mapCanvas.classList.add("hidden");
   hangarLayer.classList.add("hidden");
+  hideBattleResult();
   document.body.classList.remove("map-mode");
-  currentEnemy = { ...enemy };
+  if (questStage === "briefing") questStage = "active";
+  setUnitStatus(player, "正常", 0);
+  player.guard = false;
+  currentEnemy = { status: "正常", statusTurns: 0, ...enemy };
   battleLayer.classList.remove("hidden");
+  hideDialogBox();
   ui.enemyName.textContent = currentEnemy.name;
   setComms("敌方驾驶员", `${currentEnemy.name} 接入战术频道。`, 3);
   addLog(`${currentEnemy.name} 锁定了你。`);
@@ -875,22 +1166,39 @@ function startBattle(enemy) {
 
 function endBattle(won) {
   const defeatedName = currentEnemy?.name ?? "敌机";
+  let resultTitle = won ? "战斗胜利" : "战斗失败";
+  const resultLines = [];
+  let nextText = "返回地图继续任务。";
   if (won) {
     const original = enemies.find((enemy) => enemy.name === defeatedName);
     if (original) original.defeated = true;
-    const scrapReward = currentEnemy?.training ? 3 : rand(1, 3);
+    const scrapReward = currentEnemy?.scrapReward ?? (currentEnemy?.training ? 1 : rand(1, 3));
     const creditReward = rand(45, 80);
-    if (!currentEnemy?.training) player.wins += 1;
+    player.wins += 1;
     player.scrap += scrapReward;
     player.credits += creditReward;
     player.level = 1 + Math.floor(player.wins / 2);
     player.maxEn = 60 + player.level * 4;
     player.en = Math.min(player.maxEn, player.en + 24);
+    resultLines.push(`${defeatedName} 停机`);
+    resultLines.push(`获得 ${creditReward} Cr`);
+    resultLines.push(`获得 ${scrapReward} 零件`);
     addLog(currentEnemy?.training ? `${defeatedName} 停机，回收训练零件。` : `${defeatedName} 停机，回收蓝图碎片 ${player.wins}/${enemies.length}。`);
     addLog(`战利品：${creditReward} Cr，${scrapReward} 零件。`);
     if (currentEnemy?.training) {
-      setComms("驾驶员 洛辰", "训练机停机。带着零件去找老师交付。", 0);
+      trainingEnemyIndex = Math.min(trainingEnemyIndex + 1, trainingEnemies.length);
+      if (trainingEnemyIndex >= trainingEnemies.length) {
+        questStage = "report";
+        nextText = "训练完成：返回地图找老师交付 3 个零件。";
+        setComms("驾驶员 洛辰", "三台训练机全部停机。带着零件去找老师交付。", 0);
+      } else {
+        questStage = "active";
+        nextText = `下一目标：返回任务点挑战 ${currentTrainingEnemy().name}。`;
+        setComms("驾驶员 洛辰", `${defeatedName} 停机。继续处理第 ${trainingProgressText()} 台训练机。`, 0);
+      }
     } else if (remainingEnemyCount() === 0) {
+      questStage = "report";
+      nextText = "任务更新：返回基地交付蓝图碎片。";
       setComms("驾驶员 洛辰", "四个信号源都熄灭了。回基地交付蓝图碎片。", 0);
     } else {
       setComms("驾驶员 洛辰", `目标清除。还有 ${remainingEnemyCount()} 台敌机在外圈活动。`, 0);
@@ -900,28 +1208,68 @@ function endBattle(won) {
     player.en = 34;
     player.x = BASE_COORD.x;
     player.y = BASE_COORD.y;
+    resultLines.push("机体紧急回收");
+    resultLines.push("装甲临时恢复至 55%");
+    nextText = "返回基地整备后可以再次出击。";
+    postBattleDialog = {
+      speaker: "基地指挥官",
+      text: "游隼已拖回基地。先整备恢复装甲和能量，再重新挑战失控训练机。",
+      portrait: 1,
+    };
     setComms("基地指挥官", "机体已回收。修复后重新出击，别让蓝图落在废土里。", 1);
     addLog("机体紧急弹射回基地，装甲临时修复。");
   }
   currentEnemy = null;
-  battleLocked = false;
+  setUnitStatus(player, "正常", 0);
+  player.guard = false;
+  battleLocked = true;
   battleAnim = null;
   battleFx = { shake: 0, flash: 0, text: "", kind: "muzzle", x: 438, y: 88 };
+  setBattleButtons(true);
+  updateUi();
+  showBattleResult(resultTitle, resultLines, nextText);
+}
+
+function showBattleResult(title, lines, nextText) {
+  if (!ui.battleResult) return;
+  ui.battleResultTitle.textContent = title;
+  ui.battleResultLines.innerHTML = "";
+  lines.forEach((line) => {
+    const item = document.createElement("li");
+    item.textContent = line;
+    ui.battleResultLines.append(item);
+  });
+  ui.battleResultNext.textContent = nextText;
+  ui.battleResult.classList.remove("hidden");
+}
+
+function hideBattleResult() {
+  ui.battleResult?.classList.add("hidden");
+}
+
+function continueAfterBattleResult() {
+  hideBattleResult();
+  battleLocked = false;
   setBattleButtons(false);
   battleLayer.classList.add("hidden");
-  updateUi();
   showMap({ preserveComms: true });
+  if (postBattleDialog) {
+    setComms(postBattleDialog.speaker, postBattleDialog.text, postBattleDialog.portrait);
+    postBattleDialog = null;
+  }
 }
 
 function playerAction(action) {
   if (mode !== "battle" || !currentEnemy || battleLocked) return;
   player.guard = false;
+  if (player.status === "防御中") setUnitStatus(player, "正常", 0);
 
   if (action === "guard") {
     setBattleButtons(true);
     player.guard = true;
+    setUnitStatus(player, "防御中", 1);
     player.en = Math.min(player.maxEn, player.en + 18);
-    startBattleAnim({ actor: "player", kind: "shield", text: "+EN", x: 142, y: 72, duration: 520 });
+    startBattleAnim({ actor: "player", kind: "shield", text: "+EN", label: "防御姿态", x: 142, y: 72, duration: 520 });
     addLog("游隼架起盾场，能量回流。");
     updateUi();
     setTimeout(enemyTurn, 560);
@@ -937,7 +1285,8 @@ function playerAction(action) {
     player.en -= 14;
     const fixed = rand(22, 34);
     player.hp = Math.min(player.maxHp, player.hp + fixed);
-    startBattleAnim({ actor: "player", kind: "repair", text: `+${fixed}`, x: 142, y: 72, duration: 560 });
+    setUnitStatus(player, "维修中", 1);
+    startBattleAnim({ actor: "player", kind: "repair", text: `+${fixed}`, label: "维修核心", x: 142, y: 72, duration: 560 });
     addLog(`纳米维修回复 ${fixed} 装甲。`);
     updateUi();
     setTimeout(enemyTurn, 600);
@@ -952,11 +1301,15 @@ function playerAction(action) {
 
   setBattleButtons(true);
   player.en = Math.min(player.maxEn, player.en - weapon.energy + (weapon.energy <= 0 ? 8 : 0));
-  const damage = rand(...weapon.damage) + player.level * 2;
+  if (["missile"].includes(action) || player.weapon === "rail") setUnitStatus(currentEnemy, "过热", 1);
+  if (action === "blade") setUnitStatus(currentEnemy, "破甲", 2);
+  const defenseCut = Math.floor((currentEnemy.defense ?? 0) / 4);
+  const statusBonus = currentEnemy.status === "破甲" ? 6 : 0;
+  const damage = Math.max(6, rand(...weapon.damage) + player.level * 2 + statusBonus - defenseCut);
   currentEnemy.hp = Math.max(0, currentEnemy.hp - damage);
   const kind = action === "missile" ? "missile" : action === "blade" ? "slash" : player.weapon === "rail" ? "rail" : "muzzle";
   const duration = kind === "slash" ? 900 : kind === "missile" ? 760 : 640;
-  startBattleAnim({ actor: "player", target: "enemy", kind, text: `-${damage}`, x: 404, y: 64, duration, shake: 8 });
+  startBattleAnim({ actor: "player", target: "enemy", kind, text: `-${damage}`, label: weapon.label, x: 404, y: 64, duration, shake: 8 });
   addLog(`${weapon.log} 造成 ${damage} 伤害。`);
   updateUi();
 
@@ -970,13 +1323,18 @@ function playerAction(action) {
 function enemyTurn() {
   if (!currentEnemy) return;
   const charged = currentEnemy.en >= 18 && Math.random() > 0.52;
-  const raw = charged ? rand(currentEnemy.atk + 9, currentEnemy.atk + 18) : rand(currentEnemy.atk - 3, currentEnemy.atk + 7);
-  const damage = Math.max(4, player.guard ? Math.floor(raw * 0.42) : raw);
+  let raw = charged ? rand(currentEnemy.atk + 9, currentEnemy.atk + 18) : rand(currentEnemy.atk - 3, currentEnemy.atk + 7);
+  if (currentEnemy.status === "过热") raw = Math.max(4, raw - 5);
+  const armorCut = Math.floor(player.defense / 6);
+  const damage = Math.max(4, player.guard ? Math.floor((raw - armorCut) * 0.42) : raw - armorCut);
   currentEnemy.en = charged ? currentEnemy.en - 18 : Math.min(60, currentEnemy.en + 10);
   player.hp = Math.max(0, player.hp - damage);
-  startBattleAnim({ actor: "enemy", target: "player", kind: charged ? "explosion" : "muzzle", text: `-${damage}`, x: 186, y: 72, duration: 640, shake: 8 });
+  startBattleAnim({ actor: "enemy", target: "player", kind: charged ? "explosion" : "muzzle", text: `-${damage}`, label: charged ? "敌机重击" : "敌机开火", x: 186, y: 72, duration: 640, shake: 8 });
   addLog(`${currentEnemy.name}${charged ? "释放重击" : "开火"}，装甲损失 ${damage}。`);
   updateUi();
+  tickUnitStatus(currentEnemy);
+  tickUnitStatus(player);
+  player.guard = false;
   if (player.hp <= 0) {
     setTimeout(() => endBattle(false), 760);
   } else {
@@ -991,13 +1349,14 @@ function setBattleButtons(disabled) {
   });
 }
 
-function startBattleAnim({ actor, target = "", kind, text, x, y, duration = 560, shake = 0 }) {
+function startBattleAnim({ actor, target = "", kind, text, label = "", x, y, duration = 560, shake = 0 }) {
   battleFx = { shake, flash: Math.ceil(duration / 40), text, kind, x, y };
   battleAnim = {
     actor,
     target,
     kind,
     text,
+    label,
     x,
     y,
     start: performance.now(),
@@ -1006,13 +1365,14 @@ function startBattleAnim({ actor, target = "", kind, text, x, y, duration = 560,
 }
 
 const battleLayout = {
-  topPanel: { x: 34, y: 10, w: 300, h: 64 },
-  bottomPanel: { x: 318, y: 286, w: 300, h: 64 },
+  topPanel: { x: 28, y: 8, w: 352, h: 66 },
+  bottomPanel: { x: 260, y: 286, w: 352, h: 66 },
+  actionPanel: { x: 260, y: 157, w: 120, h: 40 },
   playerLane: { y: 78, floor: 176 },
   enemyLane: { y: 202, floor: 284 },
-  playerHome: { x: 128, y: 182 },
-  enemyHome: { x: 500, y: 274 },
-  unitSize: 106,
+  playerHome: { x: 138, y: 186 },
+  enemyHome: { x: 492, y: 274 },
+  unitSize: 118,
 };
 
 function showHangar() {
@@ -1024,6 +1384,7 @@ function showHangar() {
   document.body.classList.remove("map-mode");
   ui.speech.textContent = "机库待命。检查机体状态后可以直接出击。";
   document.querySelector("#areaLabel").textContent = "基地机库";
+  updateUi();
   drawHangar();
 }
 
@@ -1038,6 +1399,7 @@ function showMap(options = {}) {
   if (!options.preserveComms) {
     setComms("驾驶员 洛辰", "进入外勤地图。找到敌方信号源后接触开战。", 0);
   }
+  updateUi();
   drawMap();
 }
 
@@ -1054,26 +1416,14 @@ function closePanel() {
 }
 
 function launchBattle() {
-  const target = enemies.find((enemy) => !enemy.defeated) ?? {
-    x: -1,
-    y: -1,
-    name: "失控训练机",
-    hp: 86,
-    maxHp: 86,
-    en: 36,
-    atk: 11,
-    defense: 10,
-    sprite: 4,
-    defeated: false,
-    training: true,
-  };
+  const target = enemies.find((enemy) => !enemy.defeated) ?? (isMissionBattleAvailable() ? currentTrainingEnemy() : null);
   if (!target) {
-    setComms("基地指挥官", "敌机信号已经清空。返回基地交付蓝图碎片。", 1);
+    setComms("基地指挥官", "敌机信号已经清空。返回找老师交付零件。", 1);
     addLog("没有可出击目标。");
     showMap({ preserveComms: true });
     return;
   }
-  setComms("驾驶员 洛辰", "游隼出击。把战斗压在第一轮。", 0);
+  setComms("驾驶员 洛辰", `${target.name} 锁定。游隼出击。`, 0);
   startBattle(target);
 }
 
@@ -1138,6 +1488,62 @@ function updateUi() {
   document.querySelectorAll(".slot").forEach((button) => {
     button.classList.toggle("active", button.dataset.equip === player.weapon);
   });
+  document.querySelectorAll("[data-upgrade]").forEach((button) => {
+    const option = upgradeOptions[button.dataset.upgrade];
+    const affordable = option && player.scrap >= option.cost;
+    button.classList.toggle("affordable", Boolean(affordable));
+    button.title = option ? `${option.label}：需要 ${option.cost} 零件，当前 ${player.scrap}` : "";
+  });
+  if (ui.upgradeHint) {
+    ui.upgradeHint.textContent = player.scrap >= 2 ? `当前 ${player.scrap} 零件，可进行改装。` : `当前 ${player.scrap} 零件，至少需要 2 个。`;
+  }
+  updateSaveMeta();
+  updateGuideLine();
+}
+
+function upgradeMech(type) {
+  const option = upgradeOptions[type];
+  if (!option) return;
+  if (player.scrap < option.cost) {
+    setComms("机械师 阿棠", `${option.label}需要 ${option.cost} 个零件。现在只有 ${player.scrap} 个，先去战斗或回收。`, 2);
+    addLog(`${option.label}失败：零件不足。`);
+    return;
+  }
+  player.scrap -= option.cost;
+  option.apply();
+  setComms("机械师 阿棠", option.message, 2);
+  addLog(option.log);
+  updateUi();
+  drawHangar();
+  if (mode === "battle") drawBattle();
+}
+
+function updateSaveMeta() {
+  if (!ui.saveMeta) return;
+  ui.saveMeta.innerHTML = [
+    `阶段：${questStageLabel()}`,
+    `上次保存：${formatSaveTime(lastSavedAt)}`,
+    `完成时间：${formatSaveTime(demoCompletedAt)}`,
+  ].join("<br>");
+}
+
+function updateGuideLine() {
+  if (!ui.guideLine) return;
+  let text = "WASD / 方向键移动，靠近 NPC 按 E 或点击交互。";
+  if (mode === "hangar") {
+    text = "点“大地图”进入外勤；机库可整备，装备菜单可改装机体。";
+  } else if (mode === "battle") {
+    text = "选择机炮、光刃或导弹攻击；防御回能，修理恢复装甲。";
+  } else if (demoComplete || questStage === "complete") {
+    text = "Demo 闭环完成。打开机体查看强化，或在装备菜单继续改装。";
+  } else if (questStage === "briefing") {
+    text = "靠近老师按 E，或直接点击老师接取训练任务。";
+  } else if (questStage === "active") {
+    text = "前往地图上的敌机标记，靠近后按 E 或点击进入训练战。";
+  } else if (questStage === "report") {
+    text = "带 3 个零件回到老师旁，按 E 或点击老师交付任务。";
+  }
+  ui.guideLine.textContent = text;
 }
 
 function drawTile(x, y, type, camera) {
@@ -1344,12 +1750,17 @@ function drawEffect(ctx, kind, x, y, size, facing = 1) {
 }
 
 function drawPortrait(index) {
-  portraitCtx.clearRect(0, 0, portraitCanvas.width, portraitCanvas.height);
-  portraitCtx.fillStyle = "#0f151b";
-  portraitCtx.fillRect(0, 0, 64, 64);
-  if (index === 0 && drawSprite(portraitCtx, assets.conceptPortrait, 0, 128, 32, 32, 64, 64, 1)) return;
-  if (index === 0 && drawSprite(portraitCtx, assets.heroPortrait, 0, 64, 32, 32, 64, 64, 1)) return;
-  drawSprite(portraitCtx, assets.portraits, index, 64, 32, 32, 64, 64, 1);
+  drawPortraitCanvas(portraitCtx, index);
+  if (dialogPortraitCtx) drawPortraitCanvas(dialogPortraitCtx, index);
+}
+
+function drawPortraitCanvas(ctx, index) {
+  ctx.clearRect(0, 0, 64, 64);
+  ctx.fillStyle = "#0f151b";
+  ctx.fillRect(0, 0, 64, 64);
+  if (index === 0 && drawSprite(ctx, assets.conceptPortrait, 0, 128, 32, 32, 64, 64, 1)) return;
+  if (index === 0 && drawSprite(ctx, assets.heroPortrait, 0, 64, 32, 32, 64, 64, 1)) return;
+  drawSprite(ctx, assets.portraits, index, 64, 32, 32, 64, 64, 1);
 }
 
 function drawMap() {
@@ -1395,6 +1806,19 @@ function drawMap() {
       },
     });
   });
+  if (isMissionBattleAvailable()) {
+    const enemy = currentTrainingEnemy();
+    const x = missionBattlePoint.x * TILE + TILE / 2 - camera.x;
+    const y = missionBattlePoint.y * TILE + TILE / 2 + 4 - camera.y;
+    actors.push({
+      y,
+      draw: () => {
+        const bob = Math.sin(now / 240) * 1.4;
+        drawActorShadow(mapCtx, x, y, 30, 8);
+        drawEnemyMarker(mapCtx, x, y + bob, enemy?.sprite ?? 4);
+      },
+    });
+  }
   npcs.forEach((npc) => {
     const x = npc.x * TILE + TILE / 2 - camera.x;
     const y = npc.y * TILE + TILE / 2 + 4 - camera.y;
@@ -1599,7 +2023,7 @@ function drawBattle() {
     atk: player.atk + player.level * 2,
     defense: player.defense,
     weapon: weapons[player.weapon].label,
-    status: player.guard ? "防御中" : "正常",
+    status: battleAnim?.actor === "player" && battleAnim.kind === "repair" ? "维修中" : player.status || "正常",
   });
   if (currentEnemy) {
     drawBattleStatusPanel(battleCtx, battleLayout.bottomPanel, {
@@ -1612,7 +2036,7 @@ function drawBattle() {
       atk: currentEnemy.atk,
       defense: currentEnemy.defense ?? 8,
       weapon: currentEnemy.training ? "训练武装" : "敌机武装",
-      status: battleAnim?.target === "enemy" ? "受击" : "正常",
+      status: battleAnim?.target === "enemy" ? "受击" : currentEnemy.status || "正常",
     });
   }
   const pose = getBattlePose(now);
@@ -1637,7 +2061,7 @@ function drawBattle() {
 function drawBattleStage(ctx) {
   if (assets.battleField.complete && assets.battleField.naturalWidth) {
     ctx.drawImage(assets.battleField, 0, 0, battleCanvas.width, battleCanvas.height);
-    ctx.fillStyle = "rgba(3, 8, 18, 0.2)";
+    ctx.fillStyle = "rgba(3, 8, 18, 0.3)";
     ctx.fillRect(0, 0, battleCanvas.width, battleCanvas.height);
     drawBattleLaneFocus(ctx);
     return;
@@ -1657,7 +2081,7 @@ function drawBattleLaneFocus(ctx) {
   ctx.fillStyle = "rgba(255, 255, 255, 0.035)";
   ctx.fillRect(0, battleLayout.playerLane.y + 18, battleCanvas.width, 64);
   ctx.fillRect(0, battleLayout.enemyLane.y + 6, battleCanvas.width, 70);
-  ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+  ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
   ctx.fillRect(0, 0, battleCanvas.width, battleLayout.topPanel.y + battleLayout.topPanel.h + 2);
   ctx.fillRect(0, battleLayout.bottomPanel.y + battleLayout.bottomPanel.h + 1, battleCanvas.width, battleCanvas.height);
   ctx.strokeStyle = "rgba(88, 199, 255, 0.35)";
@@ -1668,6 +2092,53 @@ function drawBattleLaneFocus(ctx) {
   ctx.moveTo(0, battleLayout.enemyHome.y - 3);
   ctx.lineTo(battleCanvas.width, battleLayout.enemyHome.y - 3);
   ctx.stroke();
+  ctx.restore();
+}
+
+function drawBattleActionBanner(ctx, anim) {
+  const box = battleLayout.actionPanel;
+  const progress = Math.min(1, (performance.now() - anim.start) / anim.duration);
+  const label = anim.label || battleActionName(anim.kind);
+  const pulse = Math.sin(progress * Math.PI) * 4;
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.38)";
+  ctx.fillRect(box.x + 3, box.y + 4, box.w, box.h);
+  ctx.fillStyle = "rgba(30, 46, 92, 0.96)";
+  ctx.fillRect(box.x, box.y - pulse, box.w, box.h);
+  ctx.strokeStyle = "#fff7c6";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(box.x + 0.5, box.y - pulse + 0.5, box.w - 1, box.h - 1);
+  ctx.strokeStyle = "#21325f";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(box.x + 4.5, box.y - pulse + 4.5, box.w - 9, box.h - 9);
+  drawPixelArrow(ctx, box.x - 10, box.y - pulse + box.h / 2, 1);
+  drawPixelArrow(ctx, box.x + box.w + 10, box.y - pulse + box.h / 2, -1);
+  ctx.font = "bold 15px Microsoft YaHei, sans-serif";
+  ctx.textAlign = "center";
+  drawBattleText(ctx, label, box.x + box.w / 2, box.y - pulse + 25, "#d9f7ff");
+  ctx.textAlign = "left";
+  ctx.restore();
+}
+
+function battleActionName(kind) {
+  if (kind === "slash") return "光刃突袭";
+  if (kind === "missile") return "蜂巢导弹";
+  if (kind === "rail") return "磁轨射击";
+  if (kind === "shield") return "防御姿态";
+  if (kind === "repair") return "维修核心";
+  return "机炮射击";
+}
+
+function drawPixelArrow(ctx, x, y, dir) {
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.scale(dir, 1);
+  ctx.fillStyle = "#fff7c6";
+  ctx.fillRect(-6, -3, 8, 6);
+  ctx.fillRect(0, -6, 4, 12);
+  ctx.fillStyle = "#4b5ebd";
+  ctx.fillRect(-4, -1, 5, 2);
   ctx.restore();
 }
 
@@ -1930,8 +2401,16 @@ window.addEventListener("blur", () => {
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closePanel();
+  if (event.key === "Escape") {
+    closeDialog();
+    closePanel();
+  }
   if (!isUiInputTarget(event.target) && ["e", "enter", " "].includes(event.key.toLowerCase())) {
+    if (isDialogVisible()) {
+      closeDialog();
+      event.preventDefault();
+      return;
+    }
     if (interactWithNpc()) event.preventDefault();
   }
   if (DEV_MODE && event.key.toLowerCase() === "c") {
@@ -1969,6 +2448,28 @@ document.addEventListener("keydown", (event) => {
 mapCanvas.addEventListener("pointerdown", (event) => {
   if (mode === "map" && (!DEV_MODE || (!showCollisionDebug && !showNpcDebug && !showScrapDebug))) {
     if (document.body.classList.contains("panel-open") && sidePanel.dataset.active === "pilot") closePanel();
+    const { x, y } = getMapTileFromPointer(event);
+    const missionPoint = missionBattlePointAt(x, y);
+    if (missionPoint && isNearPlayer(x, y)) {
+      event.preventDefault();
+      const enemy = currentTrainingEnemy();
+      setComms("系统", `${enemy?.name ?? "敌机"} 信号锁定，游隼出击。`, 0);
+      launchBattle();
+      return;
+    }
+    const clickedNpc = npcAt(x, y);
+    const nearPlayer = isNearPlayer(x, y);
+    if (clickedNpc && nearPlayer) {
+      event.preventDefault();
+      interactWithNpcTarget(clickedNpc);
+      return;
+    }
+    const clickedScrap = scrapNodeAt(x, y);
+    if (clickedScrap && nearPlayer) {
+      event.preventDefault();
+      collectScrapNode(clickedScrap);
+      return;
+    }
     return;
   }
   if (!DEV_MODE || mode !== "map" || (!showCollisionDebug && !showNpcDebug && !showScrapDebug)) return;
@@ -2020,6 +2521,10 @@ document.querySelectorAll("[data-equip]").forEach((button) => {
   });
 });
 
+document.querySelectorAll("[data-upgrade]").forEach((button) => {
+  button.addEventListener("click", () => upgradeMech(button.dataset.upgrade));
+});
+
 document.querySelectorAll("[data-screen]").forEach((button) => {
   button.addEventListener("click", () => {
     const screen = button.dataset.screen;
@@ -2043,6 +2548,8 @@ document.querySelectorAll("[data-demo-action]").forEach((button) => {
     updateUi();
   });
 });
+
+document.querySelector("[data-battle-continue]")?.addEventListener("click", continueAfterBattleResult);
 
 document.querySelectorAll("[data-dev-action]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -2095,6 +2602,12 @@ document.querySelectorAll("[data-dev-action]").forEach((button) => {
 
 document.querySelectorAll("[data-panel-close]").forEach((button) => {
   button.addEventListener("click", closePanel);
+});
+
+document.querySelector("[data-dialog-close]")?.addEventListener("click", closeDialog);
+document.querySelector("[data-demo-complete-close]")?.addEventListener("click", () => {
+  hideDemoCompleteModal();
+  openPanel("mech");
 });
 
 document.querySelectorAll("[data-move]").forEach((button) => {

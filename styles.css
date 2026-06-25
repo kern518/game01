@@ -30,9 +30,24 @@ body {
   padding: 24px;
 }
 
+body.dev-mode {
+  overflow-x: auto;
+  place-items: start center;
+}
+
 .shell {
   width: min(1240px, 100%);
   display: block;
+}
+
+body.dev-mode .shell {
+  width: 1240px;
+  max-width: none;
+}
+
+body.dev-mode .game-panel {
+  width: 960px;
+  max-width: none;
 }
 
 .game-panel,
@@ -120,6 +135,17 @@ h2 {
   min-height: 30px;
   padding: 0 10px;
   font-size: 12px;
+}
+
+.guide-line {
+  border-top: 1px solid rgba(82, 109, 178, 0.55);
+  border-bottom: 1px solid rgba(82, 109, 178, 0.55);
+  background: rgba(7, 11, 20, 0.78);
+  color: #d9f7ff;
+  min-height: 26px;
+  padding: 5px 12px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .screen-wrap {
@@ -244,9 +270,11 @@ canvas {
 .dev-tools {
   position: absolute;
   z-index: 8;
-  top: 22px;
-  right: 22px;
-  width: 252px;
+  top: 12px;
+  right: -278px;
+  width: 260px;
+  max-height: calc(100vh - 48px);
+  overflow: auto;
   display: grid;
   gap: 8px;
   padding: 10px;
@@ -365,6 +393,178 @@ canvas {
   box-shadow: inset 0 0 18px rgba(88, 199, 255, 0.24);
 }
 
+.battle-result {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 5, 10, 0.46);
+}
+
+.battle-result.hidden {
+  display: none;
+}
+
+.battle-result-card {
+  width: min(360px, calc(100% - 32px));
+  border: 2px solid #eef4ff;
+  background:
+    linear-gradient(180deg, rgba(72, 82, 222, 0.96), rgba(42, 50, 154, 0.96));
+  box-shadow:
+    inset 0 0 0 1px #263071,
+    0 14px 30px rgba(0, 0, 0, 0.48);
+  padding: 14px;
+}
+
+.battle-result-card strong {
+  display: block;
+  color: #fff4a0;
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.battle-result-card ul {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.6;
+}
+
+.battle-result-card p {
+  color: #d9f7ff;
+  margin-top: 8px;
+}
+
+.battle-result-card button {
+  width: 100%;
+  margin-top: 12px;
+  border-color: #fff4a0;
+}
+
+.dialog-box {
+  position: fixed;
+  z-index: 30;
+  left: 50%;
+  bottom: 24px;
+  width: min(900px, calc(100vw - 48px));
+  transform: translateX(-50%);
+  min-height: 104px;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 32px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 2px solid #eef4ff;
+  background:
+    linear-gradient(180deg, rgba(68, 78, 218, 0.96), rgba(34, 42, 142, 0.96));
+  box-shadow:
+    inset 0 0 0 1px #263071,
+    0 12px 28px rgba(0, 0, 0, 0.5);
+}
+
+.dialog-box.hidden {
+  display: none;
+}
+
+.dialog-portrait {
+  width: 72px;
+  height: 72px;
+  border: 1px solid #91a6ff;
+  background: #09111f;
+  display: grid;
+  place-items: center;
+}
+
+#dialogPortrait {
+  width: 64px;
+  height: 64px;
+  background: #0f151b;
+}
+
+.dialog-content {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.dialog-content strong {
+  color: #fff4a0;
+  font-size: 14px;
+  text-shadow: 1px 1px 0 #10142e;
+}
+
+.dialog-content p {
+  color: #ffffff;
+  line-height: 1.45;
+  min-height: 40px;
+  text-shadow: 1px 1px 0 #10142e;
+}
+
+.dialog-content span {
+  color: #bcd7ff;
+  font-size: 11px;
+}
+
+.dialog-box button {
+  min-height: 28px;
+  width: 28px;
+  padding: 0;
+  align-self: start;
+  justify-self: end;
+  border-color: #91a6ff;
+}
+
+.demo-complete {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 5, 10, 0.56);
+}
+
+.demo-complete.hidden {
+  display: none;
+}
+
+.demo-complete-card {
+  width: min(420px, calc(100vw - 40px));
+  border: 2px solid #fff4a0;
+  background:
+    linear-gradient(180deg, rgba(69, 78, 218, 0.98), rgba(27, 35, 116, 0.98));
+  box-shadow:
+    inset 0 0 0 1px #263071,
+    0 18px 42px rgba(0, 0, 0, 0.55);
+  padding: 16px;
+}
+
+.demo-complete-card strong {
+  display: block;
+  color: #fff4a0;
+  font-size: 20px;
+  margin-bottom: 8px;
+  text-shadow: 1px 1px 0 #10142e;
+}
+
+.demo-complete-card p {
+  color: #ffffff;
+  line-height: 1.55;
+}
+
+.demo-complete-card ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  line-height: 1.65;
+  color: #d9f7ff;
+}
+
+.demo-complete-card button {
+  width: 100%;
+  margin-top: 14px;
+  border-color: #fff4a0;
+  color: #fff4a0;
+}
+
 .battle-layer.hidden {
   display: none;
 }
@@ -412,11 +612,40 @@ meter {
 .command-row {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-  padding: 10px;
-  background: #141b22;
-  border-top: 1px solid var(--line);
+  gap: 6px;
+  padding: 9px 10px 10px;
+  background:
+    linear-gradient(180deg, rgba(58, 65, 190, 0.28), rgba(7, 12, 26, 0.98)),
+    #080e1b;
+  border-top: 2px solid #eef4ff;
+  box-shadow: inset 0 8px 0 rgba(104, 128, 255, 0.12);
   flex: 0 0 auto;
+}
+
+.command-row button {
+  min-height: 34px;
+  border: 2px solid #526db2;
+  background:
+    linear-gradient(180deg, rgba(49, 62, 150, 0.88), rgba(9, 16, 36, 0.98));
+  color: #ffffff;
+  box-shadow:
+    inset 0 0 0 1px #101a43,
+    inset 0 8px 0 rgba(255, 255, 255, 0.06);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.command-row button:hover {
+  border-color: #fff4a0;
+  color: #fff4a0;
+  background:
+    linear-gradient(180deg, rgba(70, 84, 216, 0.92), rgba(17, 26, 62, 0.98));
+}
+
+.command-row button:disabled {
+  opacity: 0.42;
+  color: #a9b8da;
+  border-color: #34436e;
 }
 
 button {
@@ -572,6 +801,76 @@ body.panel-open .panel-backdrop {
   box-shadow: inset 4px 0 0 var(--accent), inset 0 0 12px rgba(88, 199, 255, 0.2);
 }
 
+.upgrade-panel {
+  margin-top: 10px;
+  border-top: 1px solid rgba(82, 109, 178, 0.75);
+  padding-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.upgrade-title {
+  display: grid;
+  gap: 2px;
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.upgrade-title span,
+#upgradeHint {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.upgrade-row {
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 6px 8px;
+  background:
+    linear-gradient(90deg, rgba(88, 199, 255, 0.16), rgba(7, 12, 24, 0.98)),
+    #071020;
+}
+
+.upgrade-row span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.upgrade-row b {
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.upgrade-row small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.upgrade-row em {
+  justify-self: end;
+  min-width: 52px;
+  color: var(--accent);
+  font-style: normal;
+  font-size: 11px;
+  text-align: right;
+}
+
+.upgrade-row.affordable {
+  border-color: var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent), inset 0 0 12px rgba(88, 199, 255, 0.16);
+}
+
+#upgradeHint {
+  margin: 2px 0 0;
+}
+
 .log-block ol {
   min-height: 120px;
   max-height: 200px;
@@ -579,6 +878,16 @@ body.panel-open .panel-backdrop {
   padding-left: 18px;
   margin: 8px 0 0;
   font-size: 12px;
+}
+
+.save-meta {
+  margin-top: 8px;
+  border: 1px solid rgba(82, 109, 178, 0.7);
+  background: rgba(7, 11, 20, 0.82);
+  color: #d9f7ff;
+  padding: 7px;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .log-block li {
@@ -627,6 +936,24 @@ body.panel-open .panel-backdrop {
 
   .command-row {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  .dialog-box {
+    bottom: 88px;
+    width: calc(100vw - 24px);
+    grid-template-columns: 56px minmax(0, 1fr) 28px;
+    min-height: 92px;
+    padding: 8px;
+  }
+
+  .dialog-portrait {
+    width: 56px;
+    height: 56px;
+  }
+
+  #dialogPortrait {
+    width: 50px;
+    height: 50px;
   }
 
   .hangar-layer {
