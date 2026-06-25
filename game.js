@@ -39,6 +39,7 @@ const ui = {
   upgradeHint: document.querySelector("#upgradeHint"),
   saveMeta: document.querySelector("#saveMeta"),
   guideLine: document.querySelector("#guideLine"),
+  interactHint: document.querySelector("#interactHint"),
   speaker: document.querySelector("#speaker"),
   speech: document.querySelector("#speech"),
   objective: document.querySelector("#objective"),
@@ -132,11 +133,11 @@ const enemies = [];
 const initialEnemies = enemies.map((enemy) => ({ ...enemy }));
 
 const npcTemplates = [
-  { type: "npc1", label: "npc1 巡逻员", mapSprite: "npc1", portrait: 0, speaker: "巡逻员 宁", text: "外圈道路已经打通，贴着建筑边缘走会更安全。" },
-  { type: "npc2", label: "npc2 指挥官", mapSprite: "npc2", portrait: 1, speaker: "基地指挥官", text: "旧城区还有四台敌机，把蓝图碎片带回来。" },
-  { type: "npc3", label: "npc3 机械师", mapSprite: "npc3", portrait: 2, speaker: "机械师 阿棠", text: "维修站能扩装甲，先攒两块零件。" },
-  { type: "npc4", label: "npc4 侦察兵", mapSprite: "npc4", portrait: 3, speaker: "废土侦察兵", text: "东侧有重型机甲的热源，先清小型敌机再过去。" },
-  { type: "teacher", label: "老师", mapSprite: "teacher", portrait: 2, speaker: "老师", text: "机甲不是只靠火力，能量节奏和撤退路线也要提前想好。" },
+  { type: "npc1", label: "npc1 巡逻员", mapSprite: "npc1", portrait: 0, speaker: "巡逻员 宁", text: "外圈道路已经打通。|贴着建筑边缘走会更安全，看到发光零件记得回收。" },
+  { type: "npc2", label: "npc2 指挥官", mapSprite: "npc2", portrait: 1, speaker: "基地指挥官", text: "训练区信号不稳定。|战斗失败会被拖回基地，整备后可以继续挑战。" },
+  { type: "npc3", label: "npc3 机械师", mapSprite: "npc3", portrait: 2, speaker: "机械师 阿棠", text: "维修站能恢复装甲和能量。|想永久强化机体，就打开装备菜单做机甲改装。" },
+  { type: "npc4", label: "npc4 侦察兵", mapSprite: "npc4", portrait: 3, speaker: "废土侦察兵", text: "训练机不是同一种型号。|炮击机火力高，装甲机更耐打，别只顾输出。" },
+  { type: "teacher", label: "老师", mapSprite: "teacher", portrait: 2, speaker: "老师", text: "机甲不是只靠火力。|能量节奏、撤退路线、零件回收都要提前想好。" },
 ];
 const defaultNpcInstances = [];
 runStorageMigration();
@@ -160,6 +161,8 @@ const trainingEnemies = [
     atk: 11,
     defense: 10,
     sprite: 4,
+    ai: "scout",
+    weaponLabel: "训练机炮",
     scrapReward: 1,
     training: true,
   },
@@ -172,6 +175,8 @@ const trainingEnemies = [
     atk: 14,
     defense: 12,
     sprite: 7,
+    ai: "artillery",
+    weaponLabel: "肩载炮",
     scrapReward: 1,
     training: true,
   },
@@ -184,6 +189,8 @@ const trainingEnemies = [
     atk: 16,
     defense: 18,
     sprite: 8,
+    ai: "armor",
+    weaponLabel: "重装冲击",
     scrapReward: 1,
     training: true,
   },
@@ -282,6 +289,8 @@ let showEnemyMarkers = !DEV_MODE;
 let selectedNpcType = "npc1";
 let selectedNpcInstanceId = null;
 let dialogOpenNpcId = null;
+let dialogLines = [];
+let dialogLineIndex = 0;
 let npcEraseMode = false;
 let scrapEraseMode = false;
 let demoComplete = false;
@@ -322,18 +331,27 @@ function ensureDemoTeacher() {
     x: 13,
     y: 8,
     speaker: "老师",
-    text: "三台训练机连续失控。逐台击败它们，带回 3 个零件，我会帮你强化游隼。",
+    text: "三台训练机连续失控。|逐台击败它们，带回 3 个零件，我会帮你强化游隼。",
     blocking: false,
   }));
 }
 
+function normalizeDialogLines(text) {
+  if (Array.isArray(text)) return text.map((line) => String(line).trim()).filter(Boolean);
+  return String(text).split(/\n+|\s*\|\s*/).map((line) => line.trim()).filter(Boolean);
+}
+
 function setComms(speaker, text, portrait = 0, options = {}) {
-  currentSpeaker = { speaker, text, portrait };
+  const lines = normalizeDialogLines(text);
+  const firstLine = lines[0] ?? "";
+  currentSpeaker = { speaker, text: firstLine, portrait };
   ui.speaker.textContent = speaker;
-  ui.speech.textContent = text;
+  ui.speech.textContent = firstLine;
   if (ui.dialogSpeaker) ui.dialogSpeaker.textContent = speaker;
-  if (ui.dialogText) ui.dialogText.textContent = text;
+  if (ui.dialogText) ui.dialogText.textContent = firstLine;
   drawPortrait(portrait);
+  dialogLines = lines;
+  dialogLineIndex = 0;
   const shouldShowDialog = options.showDialog ?? speaker !== "驾驶员 洛辰";
   if (shouldShowDialog) showDialogBox();
 }
@@ -341,10 +359,14 @@ function setComms(speaker, text, portrait = 0, options = {}) {
 function showDialogBox() {
   if (mode === "battle") return;
   ui.dialogBox?.classList.remove("hidden");
+  updateInteractHint();
 }
 
 function hideDialogBox() {
   ui.dialogBox?.classList.add("hidden");
+  dialogLines = [];
+  dialogLineIndex = 0;
+  updateInteractHint();
 }
 
 function isDialogVisible() {
@@ -352,8 +374,19 @@ function isDialogVisible() {
 }
 
 function closeDialog() {
+  if (advanceDialogLine()) return;
   hideDialogBox();
   dialogOpenNpcId = null;
+}
+
+function advanceDialogLine() {
+  if (!isDialogVisible() || dialogLineIndex >= dialogLines.length - 1) return false;
+  dialogLineIndex += 1;
+  const line = dialogLines[dialogLineIndex];
+  currentSpeaker.text = line;
+  ui.speech.textContent = line;
+  if (ui.dialogText) ui.dialogText.textContent = line;
+  return true;
 }
 
 function showDemoCompleteModal() {
@@ -705,6 +738,20 @@ function collectNearbyScrap() {
   return collectScrapNode(node);
 }
 
+function nearbyInteractable() {
+  if (mode !== "map") return null;
+  const mission = nearbyPoints().map((point) => missionBattlePointAt(point.x, point.y)).find(Boolean);
+  if (mission) {
+    const enemy = currentTrainingEnemy();
+    return { kind: "battle", label: `E 出击：${enemy?.name ?? "敌机"}`, x: missionBattlePoint.x, y: missionBattlePoint.y };
+  }
+  const npc = nearbyPoints().map((point) => npcAt(point.x, point.y)).find(Boolean);
+  if (npc) return { kind: "npc", label: `E 对话：${npc.speaker}`, x: npc.x, y: npc.y };
+  const scrap = nearbyPoints().map((point) => scrapNodeAt(point.x, point.y)).find(Boolean);
+  if (scrap) return { kind: "scrap", label: `E 回收：${scrap.label}`, x: scrap.x, y: scrap.y };
+  return null;
+}
+
 function interactWithMissionBattlePoint() {
   const point = nearbyPoints().map((item) => missionBattlePointAt(item.x, item.y)).find(Boolean);
   if (!point) return false;
@@ -745,20 +792,20 @@ function interactWithTeacher(target) {
   dialogOpenNpcId = target.id;
   let text = target.text;
   if (demoComplete || questStage === "complete") {
-    text = "游隼试作数据已经稳定。这个 Demo 的主线闭环完成了。";
+    text = "游隼试作数据已经稳定。|这个 Demo 的主线闭环完成了。|你可以继续改装机体，或者重置 Demo 再跑一遍流程。";
   } else if (questStage === "briefing") {
     questStage = "active";
-    text = "三台训练机连续失控。逐台击败它们，带回 3 个零件，我会帮你强化游隼。";
+    text = "三台训练机连续失控。|先从轻型训练机开始。|逐台击败它们，带回 3 个零件，我会帮你强化游隼。";
     addLog("任务接取：完成三场训练战。");
   } else if (questStage === "active") {
-    text = `先去处理第 ${trainingProgressText()} 台失控训练机。每台都能回收 1 个零件。`;
+    text = `先去处理第 ${trainingProgressText()} 台失控训练机。|每台都能回收 1 个零件。|如果撑不住，回基地整备后再出击。`;
   } else if (questStage === "report") {
     if (player.scrap >= 3) {
       player.scrap -= 3;
       completeDemo();
-      text = "零件够了。我已经强化游隼的装甲和输出，试作数据闭环完成。";
+      text = "零件够了。|我已经强化游隼的装甲和输出。|试作数据闭环完成。";
     } else {
-      text = `还差一些零件。当前 ${player.scrap}/3，继续回收后再来找我。`;
+      text = `还差一些零件。当前 ${player.scrap}/3。|继续完成训练战，或者回收地图上的散落零件。`;
     }
   }
   setComms("老师", text, target.portrait);
@@ -1303,7 +1350,8 @@ function playerAction(action) {
   player.en = Math.min(player.maxEn, player.en - weapon.energy + (weapon.energy <= 0 ? 8 : 0));
   if (["missile"].includes(action) || player.weapon === "rail") setUnitStatus(currentEnemy, "过热", 1);
   if (action === "blade") setUnitStatus(currentEnemy, "破甲", 2);
-  const defenseCut = Math.floor((currentEnemy.defense ?? 0) / 4);
+  const enemyDefense = (currentEnemy.defense ?? 0) + (currentEnemy.status === "防御中" ? 8 : 0) - (currentEnemy.status === "破甲" ? 6 : 0);
+  const defenseCut = Math.max(0, Math.floor(enemyDefense / 4));
   const statusBonus = currentEnemy.status === "破甲" ? 6 : 0;
   const damage = Math.max(6, rand(...weapon.damage) + player.level * 2 + statusBonus - defenseCut);
   currentEnemy.hp = Math.max(0, currentEnemy.hp - damage);
@@ -1322,15 +1370,32 @@ function playerAction(action) {
 
 function enemyTurn() {
   if (!currentEnemy) return;
-  const charged = currentEnemy.en >= 18 && Math.random() > 0.52;
-  let raw = charged ? rand(currentEnemy.atk + 9, currentEnemy.atk + 18) : rand(currentEnemy.atk - 3, currentEnemy.atk + 7);
+  if (currentEnemy.ai === "armor" && currentEnemy.hp > 0 && currentEnemy.en < 54 && Math.random() > 0.55) {
+    currentEnemy.en = Math.min(60, currentEnemy.en + 14);
+    setUnitStatus(currentEnemy, "防御中", 1);
+    startBattleAnim({ actor: "enemy", kind: "shield", text: "+EN", label: "装甲防御", x: 438, y: 232, duration: 560 });
+    addLog(`${currentEnemy.name} 展开重装防御，能量回流。`);
+    updateUi();
+    tickUnitStatus(player);
+    player.guard = false;
+    setTimeout(() => setBattleButtons(false), 620);
+    return;
+  }
+  const chargeChance = currentEnemy.ai === "artillery" ? 0.28 : 0.52;
+  const chargeCost = currentEnemy.ai === "artillery" ? 16 : 18;
+  const charged = currentEnemy.en >= chargeCost && Math.random() > chargeChance;
+  let raw = charged
+    ? rand(currentEnemy.atk + (currentEnemy.ai === "artillery" ? 13 : 9), currentEnemy.atk + (currentEnemy.ai === "artillery" ? 23 : 18))
+    : rand(currentEnemy.atk - 3, currentEnemy.atk + 7);
   if (currentEnemy.status === "过热") raw = Math.max(4, raw - 5);
   const armorCut = Math.floor(player.defense / 6);
   const damage = Math.max(4, player.guard ? Math.floor((raw - armorCut) * 0.42) : raw - armorCut);
-  currentEnemy.en = charged ? currentEnemy.en - 18 : Math.min(60, currentEnemy.en + 10);
+  currentEnemy.en = charged ? currentEnemy.en - chargeCost : Math.min(60, currentEnemy.en + 10);
   player.hp = Math.max(0, player.hp - damage);
-  startBattleAnim({ actor: "enemy", target: "player", kind: charged ? "explosion" : "muzzle", text: `-${damage}`, label: charged ? "敌机重击" : "敌机开火", x: 186, y: 72, duration: 640, shake: 8 });
-  addLog(`${currentEnemy.name}${charged ? "释放重击" : "开火"}，装甲损失 ${damage}。`);
+  const animKind = charged && currentEnemy.ai === "artillery" ? "missile" : charged ? "explosion" : "muzzle";
+  const label = charged ? currentEnemy.weaponLabel || "敌机重击" : "敌机开火";
+  startBattleAnim({ actor: "enemy", target: "player", kind: animKind, text: `-${damage}`, label, x: 186, y: 72, duration: 640, shake: 8 });
+  addLog(`${currentEnemy.name}${charged ? `释放${label}` : "开火"}，装甲损失 ${damage}。`);
   updateUi();
   tickUnitStatus(currentEnemy);
   tickUnitStatus(player);
@@ -1544,6 +1609,18 @@ function updateGuideLine() {
     text = "带 3 个零件回到老师旁，按 E 或点击老师交付任务。";
   }
   ui.guideLine.textContent = text;
+  updateInteractHint();
+}
+
+function updateInteractHint() {
+  if (!ui.interactHint) return;
+  const target = nearbyInteractable();
+  if (!target || isDialogVisible() || mode !== "map") {
+    ui.interactHint.classList.add("hidden");
+    return;
+  }
+  ui.interactHint.textContent = target.label;
+  ui.interactHint.classList.remove("hidden");
 }
 
 function drawTile(x, y, type, camera) {
@@ -1693,6 +1770,25 @@ function drawAlertMarker(ctx, x, y) {
   ctx.restore();
 }
 
+function drawInteractMarker(ctx, x, y, text = "E") {
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  const w = Math.max(24, text.length * 10 + 12);
+  const bx = Math.round(x - w / 2);
+  const by = Math.round(y - 54);
+  ctx.fillStyle = "rgba(5, 10, 20, 0.86)";
+  ctx.fillRect(bx + 2, by + 3, w, 18);
+  ctx.fillStyle = "rgba(66, 78, 216, 0.96)";
+  ctx.fillRect(bx, by, w, 18);
+  ctx.strokeStyle = "#eef4ff";
+  ctx.strokeRect(bx + 0.5, by + 0.5, w - 1, 17);
+  ctx.fillStyle = "#fff4a0";
+  ctx.font = "bold 11px Microsoft YaHei, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(text, Math.round(x), by + 13);
+  ctx.restore();
+}
+
 function drawWreckMarker(ctx, x, y) {
   ctx.save();
   ctx.translate(x, y);
@@ -1784,9 +1880,13 @@ function drawMap() {
   scrapNodes.filter((node) => !node.collected).forEach((node) => {
     const x = node.x * TILE + TILE / 2 - camera.x;
     const y = node.y * TILE + TILE / 2 + 4 - camera.y;
+    const isNear = isNearPlayer(node.x, node.y);
     actors.push({
       y,
-      draw: () => drawScrapNode(mapCtx, x, y, node, now),
+      draw: () => {
+        drawScrapNode(mapCtx, x, y, node, now);
+        if (isNear) drawInteractMarker(mapCtx, x, y, "E 回收");
+      },
     });
   });
   if (!DEV_MODE || showEnemyMarkers) enemies.forEach((enemy) => {
@@ -1810,23 +1910,27 @@ function drawMap() {
     const enemy = currentTrainingEnemy();
     const x = missionBattlePoint.x * TILE + TILE / 2 - camera.x;
     const y = missionBattlePoint.y * TILE + TILE / 2 + 4 - camera.y;
+    const isNear = isNearPlayer(missionBattlePoint.x, missionBattlePoint.y);
     actors.push({
       y,
       draw: () => {
         const bob = Math.sin(now / 240) * 1.4;
         drawActorShadow(mapCtx, x, y, 30, 8);
         drawEnemyMarker(mapCtx, x, y + bob, enemy?.sprite ?? 4);
+        if (isNear) drawInteractMarker(mapCtx, x, y + bob, "E 出击");
       },
     });
   }
   npcs.forEach((npc) => {
     const x = npc.x * TILE + TILE / 2 - camera.x;
     const y = npc.y * TILE + TILE / 2 + 4 - camera.y;
+    const isNear = isNearPlayer(npc.x, npc.y);
     actors.push({
       y,
       draw: () => {
         drawActorShadow(mapCtx, x, y, 24, 7);
         drawMapNpc(mapCtx, x, y, npc);
+        if (isNear) drawInteractMarker(mapCtx, x, y, "E 对话");
       },
     });
   });
@@ -1838,7 +1942,6 @@ function drawMap() {
     },
   });
   actors.sort((a, b) => a.y - b.y).forEach((actor) => actor.draw());
-  mapCtx.fillStyle = "rgba(16, 19, 24, 0.66)";
   const help = showNpcDebug
     ? `NPC 摆放：${npcs.length} 个 / 点击放置 / Shift 删除`
     : showScrapDebug
@@ -1847,12 +1950,15 @@ function drawMap() {
       ? "碰撞编辑：点击可走 / Shift 不可走 / R 重置"
       : DEV_MODE
         ? `WASD 移动 / E 对话或回收 / N NPC / M 零件 / C 碰撞`
-        : "WASD 移动 / E 对话或回收";
-  const hintWidth = showNpcDebug ? 330 : showScrapDebug ? 330 : showCollisionDebug ? 330 : DEV_MODE ? 430 : 236;
-  mapCtx.fillRect(10, 10, hintWidth, 22);
-  mapCtx.fillStyle = "#e6edf1";
-  mapCtx.font = "12px Microsoft YaHei, sans-serif";
-  mapCtx.fillText(help, 18, 25);
+        : "";
+  if (help) {
+    mapCtx.fillStyle = "rgba(16, 19, 24, 0.66)";
+    const hintWidth = showNpcDebug ? 330 : showScrapDebug ? 330 : showCollisionDebug ? 330 : 430;
+    mapCtx.fillRect(10, 10, hintWidth, 22);
+    mapCtx.fillStyle = "#e6edf1";
+    mapCtx.font = "12px Microsoft YaHei, sans-serif";
+    mapCtx.fillText(help, 18, 25);
+  }
 }
 
 function drawCollisionOverlay(camera) {
@@ -2035,7 +2141,7 @@ function drawBattle() {
       maxEn: currentEnemy.maxEn ?? 60,
       atk: currentEnemy.atk,
       defense: currentEnemy.defense ?? 8,
-      weapon: currentEnemy.training ? "训练武装" : "敌机武装",
+      weapon: currentEnemy.weaponLabel || (currentEnemy.training ? "训练武装" : "敌机武装"),
       status: battleAnim?.target === "enemy" ? "受击" : currentEnemy.status || "正常",
     });
   }
@@ -2290,8 +2396,13 @@ function drawBattleActionEffect(ctx, anim, progress) {
     return;
   }
   if (["muzzle", "rail", "missile"].includes(anim.kind)) {
-    const start = { x: battleLayout.playerHome.x + 48, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.44 };
-    const end = { x: battleLayout.enemyHome.x - 52, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.46 };
+    const fromEnemy = anim.actor === "enemy";
+    const start = fromEnemy
+      ? { x: battleLayout.enemyHome.x - 48, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.44 }
+      : { x: battleLayout.playerHome.x + 48, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.44 };
+    const end = fromEnemy
+      ? { x: battleLayout.playerHome.x + 52, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.46 }
+      : { x: battleLayout.enemyHome.x - 52, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.46 };
     const fireT = Math.min(1, Math.max(0, (progress - 0.12) / 0.72));
     const x = lerp(start.x, end.x, easeOut(fireT));
     const y = lerp(start.y, end.y, easeOut(fireT));
@@ -2300,7 +2411,7 @@ function drawBattleActionEffect(ctx, anim, progress) {
     ctx.strokeStyle = anim.kind === "rail" ? "#58c7ff" : "#ffef98";
     ctx.lineWidth = anim.kind === "rail" ? 5 : 3;
     ctx.beginPath();
-    ctx.moveTo(Math.max(start.x, x - 54), y);
+    ctx.moveTo(fromEnemy ? Math.min(start.x, x + 54) : Math.max(start.x, x - 54), y);
     ctx.lineTo(x, y);
     ctx.stroke();
     ctx.fillStyle = anim.kind === "missile" ? "#ff6e4a" : "#ffffff";
@@ -2605,9 +2716,14 @@ document.querySelectorAll("[data-panel-close]").forEach((button) => {
 });
 
 document.querySelector("[data-dialog-close]")?.addEventListener("click", closeDialog);
-document.querySelector("[data-demo-complete-close]")?.addEventListener("click", () => {
-  hideDemoCompleteModal();
-  openPanel("mech");
+document.querySelectorAll("[data-demo-complete-action]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const action = button.dataset.demoCompleteAction;
+    hideDemoCompleteModal();
+    if (action === "mech") openPanel("mech");
+    if (action === "reset") resetDemo();
+    if (action === "explore") showMap({ preserveComms: true });
+  });
 });
 
 document.querySelectorAll("[data-move]").forEach((button) => {

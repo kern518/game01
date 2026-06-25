@@ -57,6 +57,7 @@
             </div>
           </div>
           <canvas id="game" width="896" height="576" aria-label="像素游戏画面"></canvas>
+          <div id="interactHint" class="interact-hint hidden">E 对话</div>
           <div id="devTools" class="dev-tools hidden" aria-label="开发调试工具">
             <div class="dev-tools-title">
               <strong>地图编辑</strong>
@@ -165,7 +166,7 @@
             <div class="dialog-content">
               <strong id="dialogSpeaker">驾驶员 洛辰</strong>
               <p id="dialogText">游隼上线，等待出击指令。</p>
-              <span>按 E / 空格关闭</span>
+              <span>按 E / 空格继续</span>
             </div>
             <button type="button" data-dialog-close aria-label="关闭对话">×</button>
           </div>
@@ -178,7 +179,11 @@
                 <li>攻击 +2</li>
                 <li>主线闭环已完成</li>
               </ul>
-              <button type="button" data-demo-complete-close>查看机体状态</button>
+              <div class="demo-complete-actions">
+                <button type="button" data-demo-complete-action="explore">继续探索</button>
+                <button type="button" data-demo-complete-action="mech">查看机体</button>
+                <button type="button" data-demo-complete-action="reset">重置 Demo</button>
+              </div>
             </div>
           </div>
         </div>
@@ -268,6 +273,6 @@
       <button data-move="right">▶</button>
     </div>
 
-    <script src="game.js?v=mech-upgrade-v23"></script>
+    <script src="game.js?v=demo-polish-v24"></script>
   </body>
 </html>
