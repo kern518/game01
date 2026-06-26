@@ -1678,7 +1678,7 @@ function drawAnchoredBattleMech(ctx, x, footY, size, sprite, facing = 1, flash =
     );
     if (flash) {
       ctx.globalCompositeOperation = "source-atop";
-      ctx.fillStyle = "rgba(255, 255, 255, 0.62)";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.34)";
       ctx.fillRect(dx, dy, drawW, drawH);
     }
     ctx.restore();
@@ -2474,8 +2474,22 @@ function drawBattleAfterimage(ctx, progress) {
   const x = lerp(battleLayout.playerHome.x, battleLayout.enemyHome.x - 26, ghostT);
   const y = progress < 0.46 ? battleLayout.playerHome.y : battleLayout.enemyHome.y;
   ctx.save();
-  ctx.globalAlpha = 0.18 * (1 - ghostT);
-  drawAnchoredBattleMech(ctx, x - 24, y, battleLayout.unitSize, getPlayerMechaFrame(), 1, true);
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalCompositeOperation = "lighter";
+  const alpha = 0.34 * (1 - ghostT);
+  const baseX = Math.round(x - 38);
+  const baseY = Math.round(y - battleLayout.unitSize * 0.62);
+  ctx.fillStyle = `rgba(88, 255, 255, ${alpha})`;
+  ctx.fillRect(baseX - 42, baseY + 16, 74, 4);
+  ctx.fillRect(baseX - 28, baseY + 34, 58, 3);
+  ctx.fillStyle = `rgba(255, 244, 160, ${alpha * 0.75})`;
+  ctx.fillRect(baseX - 30, baseY + 24, 52, 2);
+  ctx.strokeStyle = `rgba(88, 255, 255, ${alpha})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(baseX - 36, baseY + 8);
+  ctx.lineTo(baseX + 36, baseY + 44);
+  ctx.stroke();
   ctx.restore();
 }
 
