@@ -68,6 +68,19 @@
               <button type="button" data-dev-action="npc-mode">NPC</button>
               <button type="button" data-dev-action="scrap-mode">零件</button>
             </div>
+            <div class="dev-section">
+              <b>战斗调试</b>
+              <p>快速进入战斗并重复测试攻击动画。</p>
+              <div class="dev-actions">
+                <button type="button" data-dev-action="battle-test">进战斗</button>
+                <button type="button" data-dev-action="battle-blade">测光刃</button>
+                <button type="button" data-dev-action="battle-missile">测导弹</button>
+              </div>
+              <div class="dev-actions">
+                <button type="button" data-dev-action="battle-freeze">停止动画</button>
+                <button type="button" data-dev-action="battle-reset">重置战斗</button>
+              </div>
+            </div>
             <label class="dev-check">
               <input id="enemyVisible" type="checkbox">
               显示敌人标记
@@ -273,6 +286,6 @@
       <button data-move="right">▶</button>
     </div>
 
-    <script src="game.js?v=battle-trail-v26"></script>
+    <script src="game.js?v=battle-debug-v27"></script>
   </body>
 </html>

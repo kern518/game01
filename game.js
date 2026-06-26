@@ -105,7 +105,8 @@ const SAVE_STORAGE_KEY = "mechaStorm.demoSave.v3";
 const LEGACY_SAVE_STORAGE_KEYS = ["mechaStorm.demoSave.v1", "mechaStorm.demoSave.v2"];
 const STORAGE_MIGRATION_KEY = "mechaStorm.storageMigration.v3";
 const LEGACY_STORAGE_MIGRATION_KEYS = ["mechaStorm.storageMigration.v2"];
-const DEV_MODE = new URLSearchParams(window.location.search).has("dev");
+const QUERY = new URLSearchParams(window.location.search);
+const DEV_MODE = QUERY.has("dev");
 document.body.classList.toggle("dev-mode", DEV_MODE);
 const BASE_COORD = { x: 3, y: 5 };
 const defaultMap = [
@@ -1210,6 +1211,47 @@ function startBattle(enemy) {
   addLog(`${currentEnemy.name} 锁定了你。`);
   updateUi();
   drawBattle();
+}
+
+function debugBattleEnemy() {
+  const base = currentTrainingEnemy() ?? trainingEnemies[0];
+  return {
+    status: "正常",
+    statusTurns: 0,
+    ...base,
+    hp: base.maxHp,
+    en: base.maxEn ?? base.en ?? 44,
+  };
+}
+
+function startDebugBattle() {
+  player.hp = player.maxHp;
+  player.en = player.maxEn;
+  player.guard = false;
+  setUnitStatus(player, "正常", 0);
+  startBattle(debugBattleEnemy());
+  setComms("系统", "战斗调试模式：可直接测试光刃、导弹和受击反馈。", 0);
+  addLog("战斗调试：已进入测试战斗。");
+}
+
+function triggerDebugBattleAction(action) {
+  if (mode !== "battle" || !currentEnemy) startDebugBattle();
+  player.en = player.maxEn;
+  if (currentEnemy) {
+    currentEnemy.hp = currentEnemy.maxHp;
+    currentEnemy.en = currentEnemy.maxEn ?? 60;
+    setUnitStatus(currentEnemy, "正常", 0);
+  }
+  setBattleButtons(false);
+  playerAction(action);
+}
+
+function freezeBattleAnimation() {
+  battleAnim = null;
+  battleFx = { shake: 0, flash: 0, text: "", kind: "muzzle", x: 438, y: 88 };
+  setBattleButtons(false);
+  drawBattle();
+  addLog("战斗调试：动画已停止。");
 }
 
 function endBattle(won) {
@@ -2760,6 +2802,11 @@ document.querySelectorAll("[data-dev-action]").forEach((button) => {
     }
     if (action === "scrap-clear") clearScrapNodes();
     if (action === "scrap-reset") resetScrapNodes();
+    if (action === "battle-test") startDebugBattle();
+    if (action === "battle-blade") triggerDebugBattleAction("blade");
+    if (action === "battle-missile") triggerDebugBattleAction("missile");
+    if (action === "battle-freeze") freezeBattleAnimation();
+    if (action === "battle-reset") startDebugBattle();
     updateNpcEditor();
   });
 });
@@ -2808,5 +2855,13 @@ function loop() {
 addLog("游隼上线。清理四台敌机，回收蓝图碎片。");
 initDevTools();
 updateUi();
-showMap();
+if (DEV_MODE && QUERY.has("battle")) {
+  startDebugBattle();
+  const debugAction = QUERY.get("action");
+  if (["blade", "missile", "attack"].includes(debugAction)) {
+    setTimeout(() => triggerDebugBattleAction(debugAction), 180);
+  }
+} else {
+  showMap();
+}
 loop();
