@@ -137,6 +137,12 @@ h2 {
   font-size: 12px;
 }
 
+.game-menu button.active {
+  border-color: var(--accent);
+  color: #fff4a0;
+  box-shadow: inset 0 0 10px rgba(88, 199, 255, 0.22);
+}
+
 .guide-line {
   border-top: 1px solid rgba(82, 109, 178, 0.55);
   border-bottom: 1px solid rgba(82, 109, 178, 0.55);

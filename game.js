@@ -106,7 +106,7 @@ const LEGACY_SAVE_STORAGE_KEYS = ["mechaStorm.demoSave.v1", "mechaStorm.demoSave
 const STORAGE_MIGRATION_KEY = "mechaStorm.storageMigration.v3";
 const LEGACY_STORAGE_MIGRATION_KEYS = ["mechaStorm.storageMigration.v2"];
 const QUERY = new URLSearchParams(window.location.search);
-const DEV_MODE = QUERY.has("dev");
+let DEV_MODE = QUERY.has("dev");
 document.body.classList.toggle("dev-mode", DEV_MODE);
 const BASE_COORD = { x: 3, y: 5 };
 const defaultMap = [
@@ -300,6 +300,7 @@ let questStage = "briefing";
 let trainingEnemyIndex = 0;
 let lastSavedAt = null;
 let demoCompletedAt = null;
+let devToolsReady = false;
 
 ensureDemoTeacher();
 
@@ -909,6 +910,11 @@ function initDevTools() {
     return;
   }
   ui.devTools.classList.remove("hidden");
+  if (devToolsReady) {
+    updateNpcEditor();
+    return;
+  }
+  devToolsReady = true;
   if (ui.npcSelect) {
     ui.npcSelect.innerHTML = "";
     npcTemplates.forEach((npc) => {
@@ -927,6 +933,30 @@ function initDevTools() {
     updateNpcEditor();
   });
   updateNpcEditor();
+}
+
+function setDevMode(enabled) {
+  DEV_MODE = enabled;
+  document.body.classList.toggle("dev-mode", DEV_MODE);
+  document.querySelector("[data-debug-toggle]")?.classList.toggle("active", DEV_MODE);
+  if (!DEV_MODE) {
+    showCollisionDebug = false;
+    showNpcDebug = false;
+    showScrapDebug = false;
+    npcEraseMode = false;
+    scrapEraseMode = false;
+    ui.devTools?.classList.add("hidden");
+  } else {
+    initDevTools();
+  }
+  updateNpcEditor();
+  updateUi();
+  if (mode === "map") drawMap();
+}
+
+function toggleDevMode() {
+  setDevMode(!DEV_MODE);
+  addLog(DEV_MODE ? "调试面板已开启。" : "调试面板已关闭。");
 }
 
 function buildSaveData() {
@@ -2744,6 +2774,8 @@ document.querySelectorAll("[data-screen]").forEach((button) => {
 document.querySelectorAll("button[data-panel]").forEach((button) => {
   button.addEventListener("click", () => openPanel(button.dataset.panel));
 });
+
+document.querySelector("[data-debug-toggle]")?.addEventListener("click", toggleDevMode);
 
 document.querySelectorAll("[data-demo-action]").forEach((button) => {
   button.addEventListener("click", () => {
