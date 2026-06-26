@@ -1749,9 +1749,19 @@ function drawAnchoredBattleMech(ctx, x, footY, size, sprite, facing = 1, flash =
       drawH
     );
     if (flash) {
-      ctx.globalCompositeOperation = "source-atop";
-      ctx.fillStyle = "rgba(255, 255, 255, 0.34)";
-      ctx.fillRect(dx, dy, drawW, drawH);
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 0.42;
+      ctx.drawImage(
+        assets.battleMechs,
+        col * 256,
+        row * 256,
+        256,
+        256,
+        dx,
+        dy,
+        drawW,
+        drawH
+      );
     }
     ctx.restore();
     return;
