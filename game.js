@@ -1429,7 +1429,7 @@ function playerAction(action) {
   const damage = Math.max(6, rand(...weapon.damage) + player.level * 2 + statusBonus - defenseCut);
   currentEnemy.hp = Math.max(0, currentEnemy.hp - damage);
   const kind = action === "missile" ? "missile" : action === "blade" ? "slash" : player.weapon === "rail" ? "rail" : "muzzle";
-  const duration = kind === "slash" ? 900 : kind === "missile" ? 760 : 640;
+  const duration = kind === "slash" ? 900 : kind === "missile" ? 980 : 640;
   startBattleAnim({ actor: "player", target: "enemy", kind, text: `-${damage}`, label: weapon.label, x: 404, y: 64, duration, shake: 8 });
   addLog(`${weapon.log} 造成 ${damage} 伤害。`);
   updateUi();
@@ -1467,7 +1467,7 @@ function enemyTurn() {
   player.hp = Math.max(0, player.hp - damage);
   const animKind = charged && currentEnemy.ai === "artillery" ? "missile" : charged ? "explosion" : "muzzle";
   const label = charged ? currentEnemy.weaponLabel || "敌机重击" : "敌机开火";
-  startBattleAnim({ actor: "enemy", target: "player", kind: animKind, text: `-${damage}`, label, x: 186, y: 72, duration: 640, shake: 8 });
+  startBattleAnim({ actor: "enemy", target: "player", kind: animKind, text: `-${damage}`, label, x: 186, y: 72, duration: animKind === "missile" ? 980 : 640, shake: 8 });
   addLog(`${currentEnemy.name}${charged ? `释放${label}` : "开火"}，装甲损失 ${damage}。`);
   updateUi();
   tickUnitStatus(currentEnemy);
@@ -2473,6 +2473,50 @@ function easeOut(t) {
   return 1 - Math.pow(1 - t, 3);
 }
 
+function missileBattlePath(anim, laneOffset = 0) {
+  const fromEnemy = anim.actor === "enemy";
+  const fireY = fromEnemy
+    ? battleLayout.playerHome.y - battleLayout.unitSize * 0.44
+    : battleLayout.enemyHome.y - battleLayout.unitSize * 0.46;
+  const y = Math.round(fireY + laneOffset);
+  return {
+    facing: fromEnemy ? -1 : 1,
+    start: fromEnemy
+      ? { x: battleLayout.enemyHome.x - 56, y }
+      : { x: battleLayout.playerHome.x + 56, y },
+    end: fromEnemy
+      ? { x: battleLayout.playerHome.x + 58, y }
+      : { x: battleLayout.enemyHome.x - 58, y },
+  };
+}
+
+function drawTripleMissiles(ctx, anim, progress) {
+  const lanes = [-8, 0, 8];
+  const launchDelay = 0.11;
+  const flightWindow = 0.62;
+  lanes.forEach((offset, index) => {
+    const path = missileBattlePath(anim, offset);
+    const local = (progress - 0.08 - index * launchDelay) / flightWindow;
+    if (local < 0) {
+      if (progress > index * 0.05 && progress < 0.18 + index * 0.05) {
+        drawMissileFx(ctx, 5, path.start.x, path.start.y, 42, path.facing);
+      }
+      return;
+    }
+    const t = Math.min(1, local);
+    const x = Math.round(lerp(path.start.x, path.end.x, easeOut(t)));
+    const y = path.start.y;
+    if (local <= 1) {
+      drawMissileFx(ctx, 2, x - path.facing * 24, y + 1, 42, path.facing);
+      drawMissileFx(ctx, index % 2, x, y, 40, path.facing);
+    }
+    if (local > 0.82 && local < 1.24) {
+      const boomFrame = local > 1 ? 4 : 3;
+      drawMissileFx(ctx, boomFrame, path.end.x + path.facing * 10, path.end.y + 2, 58 + index * 8, path.facing);
+    }
+  });
+}
+
 function drawBattleActionEffect(ctx, anim, progress) {
   if (anim.kind === "slash") {
     if (progress > 0.18 && progress < 0.72) {
@@ -2494,28 +2538,7 @@ function drawBattleActionEffect(ctx, anim, progress) {
   if (["muzzle", "rail", "missile"].includes(anim.kind)) {
     const fromEnemy = anim.actor === "enemy";
     if (anim.kind === "missile") {
-      const start = fromEnemy
-        ? { x: battleLayout.enemyHome.x - 52, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.44 }
-        : { x: battleLayout.playerHome.x + 52, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.46 };
-      const end = fromEnemy
-        ? { x: battleLayout.playerHome.x + 54, y: start.y }
-        : { x: battleLayout.enemyHome.x - 54, y: start.y };
-      const fireT = Math.min(1, Math.max(0, (progress - 0.1) / 0.78));
-      const eased = easeOut(fireT);
-      const x = lerp(start.x, end.x, eased);
-      const y = start.y + Math.sin(eased * Math.PI * 2) * 1.5;
-      const facing = fromEnemy ? -1 : 1;
-      ctx.save();
-      if (progress < 0.2) drawMissileFx(ctx, 5, start.x, start.y, 48, facing);
-      if (progress > 0.08 && progress < 0.92) {
-        drawMissileFx(ctx, 2, x - facing * 24, y + 1, 46, facing);
-        drawMissileFx(ctx, Math.floor(progress * 16) % 2, x, y, 44, facing);
-      }
-      if (progress > 0.68) {
-        const boomFrame = progress > 0.83 ? 4 : 3;
-        drawMissileFx(ctx, boomFrame, end.x + facing * 12, end.y + 4, 76, facing);
-      }
-      ctx.restore();
+      drawTripleMissiles(ctx, anim, progress);
       return;
     }
     const start = fromEnemy
@@ -2546,6 +2569,10 @@ function drawBattleActionEffect(ctx, anim, progress) {
 }
 
 function battleDamagePoint(anim, progress) {
+  if (anim.kind === "missile") {
+    const path = missileBattlePath(anim, 0);
+    return { x: path.end.x + path.facing * 12, y: path.end.y - 12 };
+  }
   if (anim.target === "enemy") return { x: battleLayout.enemyHome.x - 24, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.78 };
   if (anim.target === "player") return { x: battleLayout.playerHome.x + 18, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.78 };
   return { x: anim.x + 28, y: anim.y - 8 };
