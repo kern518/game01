@@ -1290,6 +1290,20 @@ function triggerDebugEnemyMissile() {
   addLog("战斗调试：播放敌方导弹轨迹。");
 }
 
+function triggerDebugEnemyCannon() {
+  if (mode !== "battle" || !currentEnemy) startDebugBattle();
+  player.hp = player.maxHp;
+  player.en = player.maxEn;
+  currentEnemy.hp = currentEnemy.maxHp;
+  currentEnemy.en = currentEnemy.maxEn ?? 60;
+  setUnitStatus(player, "正常", 0);
+  setUnitStatus(currentEnemy, "正常", 0);
+  startBattleAnim({ actor: "enemy", target: "player", kind: "muzzle", text: "-16", label: "敌方机炮", x: 186, y: 72, duration: 1080, shake: 8 });
+  setBattleButtons(true);
+  setTimeout(() => setBattleButtons(false), 1220);
+  addLog("战斗调试：播放敌方机炮轨迹。");
+}
+
 function freezeBattleAnimation() {
   battleAnim = null;
   battleFx = { shake: 0, flash: 0, text: "", kind: "muzzle", x: 438, y: 88 };
@@ -1443,7 +1457,7 @@ function playerAction(action) {
   const damage = Math.max(6, rand(...weapon.damage) + player.level * 2 + statusBonus - defenseCut);
   currentEnemy.hp = Math.max(0, currentEnemy.hp - damage);
   const kind = action === "missile" ? "missile" : action === "blade" ? "slash" : player.weapon === "rail" ? "rail" : "muzzle";
-  const duration = kind === "slash" ? 1100 : kind === "missile" ? 1450 : 760;
+  const duration = kind === "slash" ? 1100 : kind === "missile" ? 1450 : kind === "muzzle" ? 1080 : 760;
   startBattleAnim({ actor: "player", target: "enemy", kind, text: `-${damage}`, label: weapon.label, x: 404, y: 64, duration, shake: 8 });
   addLog(`${weapon.log} 造成 ${damage} 伤害。`);
   updateUi();
@@ -1481,7 +1495,7 @@ function enemyTurn() {
   player.hp = Math.max(0, player.hp - damage);
   const animKind = charged && currentEnemy.ai === "artillery" ? "missile" : charged ? "explosion" : "muzzle";
   const label = charged ? currentEnemy.weaponLabel || "敌机重击" : "敌机开火";
-  startBattleAnim({ actor: "enemy", target: "player", kind: animKind, text: `-${damage}`, label, x: 186, y: 72, duration: animKind === "missile" ? 1450 : 760, shake: 8 });
+  startBattleAnim({ actor: "enemy", target: "player", kind: animKind, text: `-${damage}`, label, x: 186, y: 72, duration: animKind === "missile" ? 1450 : animKind === "muzzle" ? 1080 : 760, shake: 8 });
   addLog(`${currentEnemy.name}${charged ? `释放${label}` : "开火"}，装甲损失 ${damage}。`);
   updateUi();
   tickUnitStatus(currentEnemy);
@@ -2551,6 +2565,78 @@ function drawTripleMissiles(ctx, anim, progress) {
   });
 }
 
+function drawCannonBurst(ctx, anim, progress) {
+  const lanes = [-5, -2, 1, 4, 7];
+  const launchDelay = 0.075;
+  const flightWindow = 0.62;
+  const routeSplit = 0.46;
+  lanes.forEach((offset, index) => {
+    const path = missileBattlePath(anim, offset);
+    const local = (progress - 0.08 - index * launchDelay) / flightWindow;
+    if (local < 0) {
+      if (progress > index * 0.035 && progress < 0.14 + index * 0.035) {
+        drawCannonMuzzle(ctx, path.segmentA.start.x, path.segmentA.start.y, path.facing);
+      }
+      return;
+    }
+    const t = Math.min(1, local);
+    const segment = t < routeSplit ? path.segmentA : path.segmentB;
+    const segmentT = t < routeSplit ? t / routeSplit : (t - routeSplit) / (1 - routeSplit);
+    const x = Math.round(lerp(segment.start.x, segment.end.x, easeOut(segmentT)));
+    const y = segment.start.y;
+    if (local <= 1) {
+      drawCannonBullet(ctx, x, y, path.facing, index);
+      if (t > routeSplit && t < routeSplit + 0.075) {
+        drawCannonMuzzle(ctx, path.segmentB.start.x, path.segmentB.start.y, path.facing);
+      }
+    }
+    if (local > 0.9 && local < 1.12) {
+      drawCannonImpact(ctx, path.segmentB.end.x + path.facing * 8, path.segmentB.end.y, index);
+    }
+  });
+}
+
+function drawCannonMuzzle(ctx, x, y, facing) {
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.scale(facing, 1);
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "rgba(255, 239, 152, 0.9)";
+  ctx.fillRect(-2, -5, 16, 10);
+  ctx.fillStyle = "rgba(88, 199, 255, 0.65)";
+  ctx.fillRect(6, -8, 10, 16);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(2, -2, 8, 4);
+  ctx.restore();
+}
+
+function drawCannonBullet(ctx, x, y, facing, index) {
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.scale(facing, 1);
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "rgba(88, 199, 255, 0.35)";
+  ctx.fillRect(-20, -2, 18, 4);
+  ctx.fillStyle = index % 2 ? "#ffef98" : "#ffffff";
+  ctx.fillRect(-4, -3, 12, 6);
+  ctx.fillStyle = "#58c7ff";
+  ctx.fillRect(5, -1, 6, 2);
+  ctx.restore();
+}
+
+function drawCannonImpact(ctx, x, y, index) {
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y));
+  ctx.imageSmoothingEnabled = false;
+  const size = 8 + index * 2;
+  ctx.fillStyle = "rgba(255, 239, 152, 0.9)";
+  ctx.fillRect(-size, -2, size * 2, 4);
+  ctx.fillRect(-2, -size, 4, size * 2);
+  ctx.fillStyle = "rgba(255, 112, 72, 0.75)";
+  ctx.fillRect(-5, -5, 10, 10);
+  ctx.restore();
+}
+
 function drawBattleActionEffect(ctx, anim, progress) {
   if (anim.kind === "slash") {
     if (progress > 0.18 && progress < 0.72) {
@@ -2573,6 +2659,10 @@ function drawBattleActionEffect(ctx, anim, progress) {
     const fromEnemy = anim.actor === "enemy";
     if (anim.kind === "missile") {
       drawTripleMissiles(ctx, anim, progress);
+      return;
+    }
+    if (anim.kind === "muzzle") {
+      drawCannonBurst(ctx, anim, progress);
       return;
     }
     const start = fromEnemy
@@ -2603,7 +2693,7 @@ function drawBattleActionEffect(ctx, anim, progress) {
 }
 
 function battleDamagePoint(anim, progress) {
-  if (anim.kind === "missile") {
+  if (anim.kind === "missile" || anim.kind === "muzzle") {
     const path = missileBattlePath(anim, 0);
     return { x: path.segmentB.end.x + path.facing * 12, y: path.segmentB.end.y - 12 };
   }
@@ -2906,8 +2996,10 @@ document.querySelectorAll("[data-dev-action]").forEach((button) => {
     if (action === "scrap-clear") clearScrapNodes();
     if (action === "scrap-reset") resetScrapNodes();
     if (action === "battle-test") startDebugBattle();
+    if (action === "battle-cannon") triggerDebugBattleAction("attack");
     if (action === "battle-blade") triggerDebugBattleAction("blade");
     if (action === "battle-missile") triggerDebugBattleAction("missile");
+    if (action === "battle-enemy-cannon") triggerDebugEnemyCannon();
     if (action === "battle-enemy-missile") triggerDebugEnemyMissile();
     if (action === "battle-freeze") freezeBattleAnimation();
     if (action === "battle-reset") startDebugBattle();
