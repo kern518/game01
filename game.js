@@ -1276,6 +1276,20 @@ function triggerDebugBattleAction(action) {
   playerAction(action);
 }
 
+function triggerDebugEnemyMissile() {
+  if (mode !== "battle" || !currentEnemy) startDebugBattle();
+  player.hp = player.maxHp;
+  player.en = player.maxEn;
+  currentEnemy.hp = currentEnemy.maxHp;
+  currentEnemy.en = currentEnemy.maxEn ?? 60;
+  setUnitStatus(player, "正常", 0);
+  setUnitStatus(currentEnemy, "正常", 0);
+  startBattleAnim({ actor: "enemy", target: "player", kind: "missile", text: "-24", label: "敌方导弹", x: 186, y: 72, duration: 1450, shake: 8 });
+  setBattleButtons(true);
+  setTimeout(() => setBattleButtons(false), 1580);
+  addLog("战斗调试：播放敌方导弹轨迹。");
+}
+
 function freezeBattleAnimation() {
   battleAnim = null;
   battleFx = { shake: 0, flash: 0, text: "", kind: "muzzle", x: 438, y: 88 };
@@ -2478,26 +2492,29 @@ function missileBattlePath(anim, laneOffset = 0) {
   const upperY = Math.round(battleLayout.playerHome.y - battleLayout.unitSize * 0.44 + laneOffset);
   const lowerY = Math.round(battleLayout.enemyHome.y - battleLayout.unitSize * 0.46 + laneOffset);
   const edgePad = 18;
+  if (fromEnemy) {
+    return {
+      facing: -1,
+      segmentA: {
+        start: { x: battleLayout.enemyHome.x - 56, y: lowerY },
+        end: { x: edgePad, y: lowerY },
+      },
+      segmentB: {
+        start: { x: battleCanvas.width - edgePad, y: upperY },
+        end: { x: battleLayout.playerHome.x + 58, y: upperY },
+      },
+    };
+  }
   return {
-    facing: fromEnemy ? -1 : 1,
-    segmentA: fromEnemy
-      ? {
-          start: { x: battleLayout.enemyHome.x - 56, y: lowerY },
-          end: { x: edgePad, y: lowerY },
-        }
-      : {
-          start: { x: battleLayout.playerHome.x + 56, y: upperY },
-          end: { x: battleCanvas.width - edgePad, y: upperY },
-        },
-    segmentB: fromEnemy
-      ? {
-          start: { x: battleCanvas.width - edgePad, y: upperY },
-          end: { x: battleLayout.playerHome.x + 58, y: upperY },
-        }
-      : {
-          start: { x: edgePad, y: lowerY },
-          end: { x: battleLayout.enemyHome.x - 58, y: lowerY },
-        },
+    facing: 1,
+    segmentA: {
+      start: { x: battleLayout.playerHome.x + 56, y: upperY },
+      end: { x: battleCanvas.width - edgePad, y: upperY },
+    },
+    segmentB: {
+      start: { x: edgePad, y: lowerY },
+      end: { x: battleLayout.enemyHome.x - 58, y: lowerY },
+    },
   };
 }
 
@@ -2527,7 +2544,7 @@ function drawTripleMissiles(ctx, anim, progress) {
         drawMissileFx(ctx, 5, path.segmentB.start.x, path.segmentB.start.y, 38, path.facing);
       }
     }
-    if (local > 0.82 && local < 1.24) {
+    if (local > 0.96 && local < 1.26) {
       const boomFrame = local > 1 ? 4 : 3;
       drawMissileFx(ctx, boomFrame, path.segmentB.end.x + path.facing * 10, path.segmentB.end.y + 2, 58 + index * 8, path.facing);
     }
@@ -2891,6 +2908,7 @@ document.querySelectorAll("[data-dev-action]").forEach((button) => {
     if (action === "battle-test") startDebugBattle();
     if (action === "battle-blade") triggerDebugBattleAction("blade");
     if (action === "battle-missile") triggerDebugBattleAction("missile");
+    if (action === "battle-enemy-missile") triggerDebugEnemyMissile();
     if (action === "battle-freeze") freezeBattleAnimation();
     if (action === "battle-reset") startDebugBattle();
     updateNpcEditor();
