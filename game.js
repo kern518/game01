@@ -72,6 +72,7 @@ const assets = {
   heroPortrait: loadImage("assets/hero-portrait.png"),
   conceptPortrait: loadImage("assets/pilot-concept-portrait.png"),
   effects: loadImage("assets/effects.png"),
+  missileFx: loadImage("assets/missile-fx.png"),
   icons: loadImage("assets/ui-icons.png"),
   battleBg: loadImage("assets/battle-bg.png"),
   battleField: loadImage("assets/battle-bg-field.png"),
@@ -1430,8 +1431,8 @@ function startBattleAnim({ actor, target = "", kind, text, label = "", x, y, dur
 }
 
 const battleLayout = {
-  topPanel: { x: 28, y: 8, w: 352, h: 66 },
-  bottomPanel: { x: 260, y: 286, w: 352, h: 66 },
+  topPanel: { x: 28, y: 8, w: 294, h: 52 },
+  bottomPanel: { x: 318, y: 300, w: 294, h: 52 },
   actionPanel: { x: 260, y: 157, w: 120, h: 40 },
   playerLane: { y: 78, floor: 176 },
   enemyLane: { y: 202, floor: 284 },
@@ -1845,6 +1846,19 @@ function drawEffect(ctx, kind, x, y, size, facing = 1) {
   drawSprite(ctx, assets.effects, effectIndex, 64, x, y, size, size, facing);
 }
 
+function drawMissileFx(ctx, frame, x, y, size = 42, facing = 1) {
+  if (!assets.missileFx.complete || !assets.missileFx.naturalWidth) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(facing, 1);
+    ctx.fillStyle = "#ff6e4a";
+    ctx.fillRect(-size * 0.35, -size * 0.1, size * 0.7, size * 0.2);
+    ctx.restore();
+    return;
+  }
+  drawSprite(ctx, assets.missileFx, frame, 64, x, y, size, size, facing);
+}
+
 function drawPortrait(index) {
   drawPortraitCanvas(portraitCtx, index);
   if (dialogPortraitCtx) drawPortraitCanvas(dialogPortraitCtx, index);
@@ -2252,31 +2266,31 @@ function drawBattleStatusPanel(ctx, box, unit) {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = "rgba(0, 0, 0, 0.34)";
-  ctx.fillRect(box.x + 4, box.y + 4, box.w, box.h);
+  ctx.fillRect(box.x + 3, box.y + 3, box.w, box.h);
   ctx.fillStyle = "rgba(57, 64, 196, 0.9)";
   ctx.fillRect(box.x, box.y, box.w, box.h);
   ctx.fillStyle = "rgba(104, 128, 255, 0.22)";
-  ctx.fillRect(box.x + 5, box.y + 5, box.w - 10, 10);
+  ctx.fillRect(box.x + 4, box.y + 4, box.w - 8, 8);
   ctx.strokeStyle = "#eef4ff";
   ctx.lineWidth = 2;
   ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
   ctx.strokeStyle = "#252b79";
   ctx.lineWidth = 1;
-  ctx.strokeRect(box.x + 4.5, box.y + 4.5, box.w - 9, box.h - 9);
+  ctx.strokeRect(box.x + 3.5, box.y + 3.5, box.w - 7, box.h - 7);
 
   ctx.fillStyle = "#fff4a0";
-  ctx.font = "bold 14px Microsoft YaHei, sans-serif";
-  drawBattleText(ctx, `${unit.name}  Lv ${unit.level}`, box.x + 10, box.y + 17, "#fff4a0");
+  ctx.font = "bold 12px Microsoft YaHei, sans-serif";
+  drawBattleText(ctx, `${unit.name}  Lv ${unit.level}`, box.x + 8, box.y + 15, "#fff4a0");
 
-  ctx.font = "bold 11px Microsoft YaHei, sans-serif";
-  drawBattleText(ctx, `装甲 ${unit.hp}/${unit.maxHp}`, box.x + 10, box.y + 34, "#ffffff");
-  drawMiniBar(ctx, box.x + 92, box.y + 26, 86, 7, unit.hp / unit.maxHp, "#ff6e4a");
-  drawBattleText(ctx, `能量 ${unit.en}/${unit.maxEn}`, box.x + 10, box.y + 48, "#bcd7ff");
-  drawMiniBar(ctx, box.x + 92, box.y + 40, 86, 7, unit.en / unit.maxEn, "#58c7ff");
-  drawBattleText(ctx, `攻 ${unit.atk}`, box.x + 194, box.y + 34, "#eef4ff");
-  drawBattleText(ctx, `防 ${unit.defense}`, box.x + 244, box.y + 34, "#eef4ff");
-  drawBattleText(ctx, `状态 ${unit.status}`, box.x + 194, box.y + 48, unit.status === "正常" ? "#d9f7ff" : "#ffef98");
-  drawBattleText(ctx, `武器 ${unit.weapon}`, box.x + 10, box.y + 60, "#ffffff");
+  ctx.font = "bold 10px Microsoft YaHei, sans-serif";
+  drawBattleText(ctx, `装甲 ${unit.hp}/${unit.maxHp}`, box.x + 8, box.y + 29, "#ffffff");
+  drawMiniBar(ctx, box.x + 80, box.y + 22, 66, 6, unit.hp / unit.maxHp, "#ff6e4a");
+  drawBattleText(ctx, `能量 ${unit.en}/${unit.maxEn}`, box.x + 8, box.y + 42, "#bcd7ff");
+  drawMiniBar(ctx, box.x + 80, box.y + 35, 66, 6, unit.en / unit.maxEn, "#58c7ff");
+  drawBattleText(ctx, `攻${unit.atk}`, box.x + 158, box.y + 29, "#eef4ff");
+  drawBattleText(ctx, `防${unit.defense}`, box.x + 204, box.y + 29, "#eef4ff");
+  drawBattleText(ctx, unit.status === "正常" ? "正常" : unit.status, box.x + 246, box.y + 29, unit.status === "正常" ? "#d9f7ff" : "#ffef98");
+  drawBattleText(ctx, `武器 ${unit.weapon}`, box.x + 158, box.y + 42, "#ffffff");
   ctx.restore();
 }
 
@@ -2397,6 +2411,31 @@ function drawBattleActionEffect(ctx, anim, progress) {
   }
   if (["muzzle", "rail", "missile"].includes(anim.kind)) {
     const fromEnemy = anim.actor === "enemy";
+    if (anim.kind === "missile") {
+      const start = fromEnemy
+        ? { x: battleLayout.enemyHome.x - 52, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.44 }
+        : { x: battleLayout.playerHome.x + 52, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.46 };
+      const end = fromEnemy
+        ? { x: battleLayout.playerHome.x + 54, y: start.y }
+        : { x: battleLayout.enemyHome.x - 54, y: start.y };
+      const fireT = Math.min(1, Math.max(0, (progress - 0.1) / 0.78));
+      const eased = easeOut(fireT);
+      const x = lerp(start.x, end.x, eased);
+      const y = start.y + Math.sin(eased * Math.PI * 2) * 1.5;
+      const facing = fromEnemy ? -1 : 1;
+      ctx.save();
+      if (progress < 0.2) drawMissileFx(ctx, 5, start.x, start.y, 48, facing);
+      if (progress > 0.08 && progress < 0.92) {
+        drawMissileFx(ctx, 2, x - facing * 24, y + 1, 46, facing);
+        drawMissileFx(ctx, Math.floor(progress * 16) % 2, x, y, 44, facing);
+      }
+      if (progress > 0.68) {
+        const boomFrame = progress > 0.83 ? 4 : 3;
+        drawMissileFx(ctx, boomFrame, end.x + facing * 12, end.y + 4, 76, facing);
+      }
+      ctx.restore();
+      return;
+    }
     const start = fromEnemy
       ? { x: battleLayout.enemyHome.x - 48, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.44 }
       : { x: battleLayout.playerHome.x + 48, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.44 };
