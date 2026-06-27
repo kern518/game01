@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>机甲风暴 - 战斗设计实验室</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #090d14;
+      color: #d9e7f2;
+      font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+    }
+    body { padding: 18px; }
+    .app {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      border: 1px solid #243a58;
+      background: #0d1420;
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 16px;
+      border-bottom: 1px solid #20344f;
+      background: linear-gradient(180deg, #111d2d, #0d1522);
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0.03em;
+    }
+    .subtitle {
+      margin-top: 3px;
+      color: #7f9ab4;
+      font-size: 12px;
+    }
+    .status {
+      color: #ffe58a;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .main {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 310px;
+      min-height: 620px;
+    }
+    .stage-wrap {
+      padding: 14px;
+      border-right: 1px solid #20344f;
+      background: #080c13;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      image-rendering: pixelated;
+      border: 1px solid #2d5274;
+      background: #101826;
+    }
+    .panel {
+      padding: 14px;
+      background: #0b111b;
+    }
+    .section {
+      padding: 12px 0;
+      border-bottom: 1px solid #1f3148;
+    }
+    .section:first-child { padding-top: 0; }
+    .section-title {
+      margin: 0 0 9px;
+      color: #58c7ff;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .seg {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 7px;
+    }
+    button {
+      min-height: 34px;
+      border: 1px solid #315074;
+      background: #101a2b;
+      color: #cfe8ff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:hover { border-color: #58c7ff; }
+    button.active {
+      border-color: #ffe58a;
+      color: #fff4b0;
+      background: #17284a;
+      box-shadow: inset 0 0 0 1px rgba(255, 229, 138, 0.25);
+    }
+    .wide { width: 100%; }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0;
+      color: #a9bfd2;
+      font-size: 13px;
+    }
+    input[type="range"] { width: 100%; }
+    .row {
+      display: grid;
+      grid-template-columns: 64px 1fr 34px;
+      align-items: center;
+      gap: 8px;
+      margin: 9px 0;
+      color: #9db3c7;
+      font-size: 12px;
+    }
+    .value {
+      color: #ffe58a;
+      text-align: right;
+      font-family: Consolas, monospace;
+    }
+    .readout {
+      min-height: 132px;
+      padding: 10px;
+      border: 1px solid #263d5a;
+      background: #08101b;
+      color: #c6d7e8;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .readout strong { color: #ffe58a; }
+    .legend {
+      display: grid;
+      gap: 7px;
+      margin-top: 10px;
+      color: #8da4b8;
+      font-size: 12px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .line {
+      width: 28px;
+      height: 3px;
+      background: #58c7ff;
+    }
+    .line.red { background: #ff5f66; }
+    .line.yellow { background: #ffe58a; }
+    .line.green { background: #55d68a; }
+    @media (max-width: 900px) {
+      body { padding: 0; }
+      .app { border-left: 0; border-right: 0; }
+      .main { grid-template-columns: 1fr; }
+      .stage-wrap { border-right: 0; border-bottom: 1px solid #20344f; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>机甲风暴：战斗设计实验室</h1>
+        <div class="subtitle">用于诊断炮口方向、目标方向、弹道、命中点是否符合战斗审美</div>
+      </div>
+      <div class="status" id="status">当前实现：朝向与目标方向冲突</div>
+    </header>
+
+    <div class="main">
+      <div class="stage-wrap">
+        <canvas id="stage" width="960" height="540"></canvas>
+        <div class="legend">
+          <div class="legend-item"><span class="line red"></span>炮口/发射器初始朝向</div>
+          <div class="legend-item"><span class="line"></span>目标方向</div>
+          <div class="legend-item"><span class="line green"></span>实际攻击轨迹</div>
+          <div class="legend-item"><span class="line yellow"></span>当前视觉矛盾或推荐修正</div>
+        </div>
+      </div>
+
+      <aside class="panel">
+        <section class="section">
+          <h2 class="section-title">武器</h2>
+          <div class="seg" id="weaponButtons">
+            <button data-weapon="cannon" class="active">机炮</button>
+            <button data-weapon="missile">导弹</button>
+            <button data-weapon="blade">光刃</button>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2 class="section-title">方案</h2>
+          <div class="seg" id="modeButtons">
+            <button data-mode="current" class="active">当前</button>
+            <button data-mode="turn">机体转向</button>
+            <button data-mode="turret">炮塔旋转</button>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2 class="section-title">显示</h2>
+          <label class="check"><input id="showDebug" type="checkbox" checked> 显示诊断线</label>
+          <label class="check"><input id="showGrid" type="checkbox" checked> 显示等距地面</label>
+          <button class="wide" id="play">播放攻击</button>
+        </section>
+
+        <section class="section">
+          <h2 class="section-title">参数</h2>
+          <div class="row">
+            <span>弧线</span>
+            <input id="arc" type="range" min="0" max="100" value="44">
+            <span class="value" id="arcVal">44</span>
+          </div>
+          <div class="row">
+            <span>尾迹</span>
+            <input id="trail" type="range" min="8" max="80" value="34">
+            <span class="value" id="trailVal">34</span>
+          </div>
+          <div class="row">
+            <span>连发</span>
+            <input id="burst" type="range" min="1" max="7" value="4">
+            <span class="value" id="burstVal">4</span>
+          </div>
+        </section>
+
+        <section class="section">
+          <h2 class="section-title">诊断</h2>
+          <div class="readout" id="readout"></div>
+        </section>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.querySelector("#stage");
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+
+    const state = {
+      weapon: "cannon",
+      mode: "current",
+      showDebug: true,
+      showGrid: true,
+      arc: 44,
+      trail: 34,
+      burst: 4,
+      playing: false,
+      start: performance.now(),
+    };
+
+    const C = {
+      bg: "#0b1019",
+      tileA: "#192334",
+      tileB: "#1d2a3d",
+      tileEdge: "#2e4664",
+      player: "#1f6feb",
+      playerHi: "#58c7ff",
+      enemy: "#b12a32",
+      enemyHi: "#ff6b72",
+      white: "#ffffff",
+      yellow: "#ffe58a",
+      green: "#55d68a",
+      red: "#ff5f66",
+      muted: "#7e95aa",
+    };
+
+    const points = {
+      playerFoot: { x: 260, y: 350 },
+      enemyFoot: { x: 710, y: 170 },
+    };
+
+    function setActive(group, key, attr) {
+      document.querySelectorAll(`#${group} button`).forEach((button) => {
+        button.classList.toggle("active", button.dataset[attr] === key);
+      });
+    }
+
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+    function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+    function easeInOut(t) { return t * t * (3 - 2 * t); }
+    function pointLine(a, b, t) { return { x: lerp(a.x, b.x, t), y: lerp(a.y, b.y, t) }; }
+    function pointQuad(a, c, b, t) {
+      const inv = 1 - t;
+      return {
+        x: inv * inv * a.x + 2 * inv * t * c.x + t * t * b.x,
+        y: inv * inv * a.y + 2 * inv * t * c.y + t * t * b.y,
+      };
+    }
+    function angle(a, b) { return Math.atan2(b.y - a.y, b.x - a.x); }
+
+    function weaponOrigin() {
+      if (state.mode === "turn") return { x: points.playerFoot.x + 42, y: points.playerFoot.y - 78 };
+      if (state.mode === "turret") return { x: points.playerFoot.x + 36, y: points.playerFoot.y - 74 };
+      if (state.weapon === "missile") return { x: points.playerFoot.x + 18, y: points.playerFoot.y - 92 };
+      return { x: points.playerFoot.x + 58, y: points.playerFoot.y - 62 };
+    }
+
+    function hitPoint() {
+      return { x: points.enemyFoot.x - 10, y: points.enemyFoot.y - 88 };
+    }
+
+    function muzzleVector() {
+      const origin = weaponOrigin();
+      if (state.mode === "turn" || state.mode === "turret") {
+        const a = angle(origin, hitPoint());
+        return { x: origin.x + Math.cos(a) * 145, y: origin.y + Math.sin(a) * 145 };
+      }
+      return { x: origin.x + 145, y: origin.y + 18 };
+    }
+
+    function drawIsoGrid() {
+      if (!state.showGrid) return;
+      const ox = 475, oy = 105;
+      const tw = 62, th = 31;
+      for (let r = 0; r < 8; r += 1) {
+        for (let c = 0; c < 10; c += 1) {
+          const x = ox + (c - r) * tw / 2;
+          const y = oy + (c + r) * th / 2;
+          ctx.fillStyle = (c + r) % 2 ? C.tileA : C.tileB;
+          ctx.strokeStyle = C.tileEdge;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x, y - th / 2);
+          ctx.lineTo(x + tw / 2, y);
+          ctx.lineTo(x, y + th / 2);
+          ctx.lineTo(x - tw / 2, y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+    }
+
+    function drawPad(x, y, color) {
+      ctx.save();
+      ctx.translate(x, y - 2);
+      ctx.scale(1.5, 0.68);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.75;
+      ctx.beginPath();
+      for (let i = 0; i < 8; i += 1) {
+        const a = i * Math.PI / 4 - Math.PI / 8;
+        const px = Math.cos(a) * 48;
+        const py = Math.sin(a) * 48;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.globalAlpha = 0.12;
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawMech(x, y, color, hi, facingMode, attacking = false) {
+      ctx.save();
+      ctx.translate(x, y);
+      if (facingMode === "left") ctx.scale(-1, 1);
+      if (facingMode === "ne") ctx.rotate(-0.22);
+      ctx.fillStyle = "rgba(0,0,0,0.42)";
+      ctx.fillRect(-26, 7, 52, 12);
+      ctx.fillStyle = color;
+      ctx.fillRect(-22, -54, 44, 34);
+      ctx.fillRect(-18, -20, 36, 32);
+      ctx.fillRect(-30, -28, 12, 28);
+      ctx.fillRect(18, -28, 12, 28);
+      ctx.fillRect(-15, 12, 11, 26);
+      ctx.fillRect(4, 12, 11, 26);
+      ctx.fillStyle = hi;
+      ctx.fillRect(-15, -49, 30, 20);
+      ctx.fillRect(-13, -13, 26, 16);
+      ctx.fillStyle = "#0b1019";
+      ctx.fillRect(-13, -42, 26, 7);
+      ctx.fillStyle = C.white;
+      ctx.fillRect(-9, -40, 18, 3);
+      ctx.fillStyle = hi;
+      ctx.fillRect(28, -20, 38, 9);
+      ctx.fillStyle = "#66778a";
+      ctx.fillRect(62, -22, 12, 13);
+      if (attacking) {
+        ctx.fillStyle = "#9df4ff";
+        ctx.fillRect(72, -22, 12, 13);
+      }
+      ctx.restore();
+    }
+
+    function drawArrow(a, b, color, dashed = false, label = "") {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 2;
+      if (dashed) ctx.setLineDash([8, 7]);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      const ang = angle(a, b);
+      ctx.translate(b.x, b.y);
+      ctx.rotate(ang);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-12, -5);
+      ctx.lineTo(-12, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+      if (label) drawLabel(label, (a.x + b.x) / 2 + 8, (a.y + b.y) / 2 - 8, color);
+    }
+
+    function drawCurve(a, c, b, color, dashed = false) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      if (dashed) ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.quadraticCurveTo(c.x, c.y, b.x, b.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawLabel(text, x, y, color = "#cfe8ff") {
+      ctx.save();
+      ctx.font = "bold 14px Microsoft YaHei, sans-serif";
+      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+      const w = ctx.measureText(text).width + 12;
+      ctx.fillRect(x - 6, y - 15, w, 20);
+      ctx.fillStyle = color;
+      ctx.fillText(text, x, y);
+      ctx.restore();
+    }
+
+    function drawConflict(origin, muzzleEnd, target) {
+      if (state.mode !== "current" || !state.showDebug || state.weapon === "blade") return;
+      const mid = { x: origin.x + 86, y: origin.y + 16 };
+      ctx.save();
+      ctx.strokeStyle = C.yellow;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.arc(mid.x, mid.y, 24, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      drawLabel("方向矛盾", mid.x + 28, mid.y + 5, C.yellow);
+    }
+
+    function drawAttack(progress) {
+      const origin = weaponOrigin();
+      const target = hitPoint();
+      const mEnd = muzzleVector();
+      const targetAngle = angle(origin, target);
+
+      if (state.showDebug) {
+        drawArrow(origin, mEnd, C.red, false, "炮口方向");
+        drawArrow(origin, target, "#58c7ff", true, "目标方向");
+        drawConflict(origin, mEnd, target);
+      }
+
+      if (!state.playing && state.weapon !== "blade") {
+        const c = state.weapon === "missile"
+          ? { x: (origin.x + target.x) / 2, y: Math.min(origin.y, target.y) - state.arc }
+          : null;
+        if (c) drawCurve(origin, c, target, C.green, false);
+        else drawArrow(origin, target, C.green, false, "预览弹道");
+        return;
+      }
+
+      const p = clamp01(progress);
+      if (state.weapon === "cannon") {
+        const n = state.burst;
+        for (let i = 0; i < n; i += 1) {
+          const local = clamp01((p - i * 0.08) / 0.62);
+          if (local <= 0 || local >= 1) continue;
+          const pt = pointLine(origin, target, easeOut(local));
+          ctx.save();
+          ctx.translate(pt.x, pt.y);
+          ctx.rotate(targetAngle);
+          ctx.fillStyle = i % 2 ? C.yellow : "#9fe8ff";
+          ctx.fillRect(-7, -2, 14, 4);
+          ctx.fillStyle = "rgba(88,199,255,0.45)";
+          ctx.fillRect(-state.trail, -1, state.trail, 2);
+          ctx.restore();
+        }
+        if (p > 0.72) drawImpact(target, "#9fe8ff");
+      }
+
+      if (state.weapon === "missile") {
+        const launch = state.mode === "current"
+          ? { x: origin.x + 70, y: origin.y + 10 }
+          : pointLine(origin, target, 0.18);
+        const control = {
+          x: (launch.x + target.x) / 2,
+          y: Math.min(launch.y, target.y) - state.arc,
+        };
+        drawCurve(origin, control, target, C.green, false);
+        const pt = p < 0.22
+          ? pointLine(origin, launch, easeOut(p / 0.22))
+          : pointQuad(launch, control, target, easeInOut((p - 0.22) / 0.78));
+        const next = pointQuad(launch, control, target, clamp01((p - 0.18) / 0.78 + 0.03));
+        const a = angle(pt, next);
+        ctx.save();
+        ctx.translate(pt.x, pt.y);
+        ctx.rotate(a);
+        ctx.fillStyle = "#ffb45f";
+        ctx.fillRect(-14, -4, 28, 8);
+        ctx.fillStyle = "#ff5f2f";
+        ctx.fillRect(8, -3, 10, 6);
+        ctx.fillStyle = "rgba(88,199,255,0.35)";
+        ctx.fillRect(-state.trail, -2, state.trail, 4);
+        ctx.restore();
+        if (p > 0.86) drawImpact(target, "#ffb45f");
+      }
+
+      if (state.weapon === "blade") {
+        const strike = { x: points.enemyFoot.x - 92, y: points.enemyFoot.y + 10 };
+        const unit = p < 0.48 ? easeOut(p / 0.48) : 1 - easeInOut((p - 0.48) / 0.52);
+        const mech = pointLine(points.playerFoot, strike, unit);
+        drawAfterImages(points.playerFoot, strike, unit);
+        drawMech(mech.x, mech.y, C.player, C.playerHi, "ne", true);
+        if (p > 0.38 && p < 0.72) {
+          ctx.save();
+          ctx.translate(strike.x + 36, strike.y - 58);
+          ctx.rotate(angle(points.playerFoot, points.enemyFoot));
+          ctx.strokeStyle = "#d78aff";
+          ctx.lineWidth = 7;
+          ctx.beginPath();
+          ctx.moveTo(-48, -20);
+          ctx.lineTo(54, 26);
+          ctx.stroke();
+          ctx.restore();
+          drawImpact(target, "#d78aff");
+        }
+      }
+    }
+
+    function drawAfterImages(a, b, t) {
+      for (let i = 1; i <= 3; i += 1) {
+        const p = clamp01(t - i * 0.12);
+        if (p <= 0) continue;
+        const pt = pointLine(a, b, p);
+        ctx.globalAlpha = 0.16 / i;
+        drawMech(pt.x, pt.y, C.player, C.playerHi, "ne", false);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    function drawImpact(target, color) {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 2;
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 8; i += 1) {
+        const a = i * Math.PI / 4;
+        const len = 12 + i % 2 * 8;
+        ctx.beginPath();
+        ctx.moveTo(target.x, target.y);
+        ctx.lineTo(target.x + Math.cos(a) * len, target.y + Math.sin(a) * len);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function drawReadout() {
+      const readout = document.querySelector("#readout");
+      const status = document.querySelector("#status");
+      const copy = {
+        current: {
+          cannon: ["当前问题", "机炮的炮口视觉上更接近横向，但目标在右上。若强行斜向飞，玩家会觉得炮口和弹道不一致。"],
+          missile: ["当前问题", "导弹可以转向，但初段必须先从发射器方向离开，再制导转向。否则像凭空拐弯。"],
+          blade: ["基本可用", "光刃是机体位移攻击，沿战斗轴突进是自然的。重点是突进终点和残影。"],
+        },
+        turn: {
+          cannon: ["推荐方案", "攻击前机体转向 NE，炮口和目标方向一致，机炮弹道最自然。需要 NE/SW 动作帧。"],
+          missile: ["推荐方案", "机体转向后，导弹初段和目标方向一致，再小幅弧线追踪。"],
+          blade: ["推荐方案", "机体沿 NE 战斗轴冲刺，斩击弧线跟随移动方向，最符合等距战斗审美。"],
+        },
+        turret: {
+          cannon: ["备选方案", "身体不转，只让炮塔/手臂旋转对准目标。适合炮台型机甲，需要单独画炮管层。"],
+          missile: ["备选方案", "肩部发射器旋转到目标方向，再发射导弹。比当前实现合理，但素材复杂度中等。"],
+          blade: ["不推荐", "光刃是近战位移，不适合只转炮塔。应该用机体转向和冲刺。"],
+        },
+      };
+      const [title, body] = copy[state.mode][state.weapon];
+      readout.innerHTML = `<strong>${title}</strong><br>${body}`;
+      status.textContent = `${title}：${body.slice(0, 24)}...`;
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = C.bg;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      drawIsoGrid();
+
+      drawPad(points.playerFoot.x, points.playerFoot.y, C.playerHi);
+      drawPad(points.enemyFoot.x, points.enemyFoot.y, C.enemyHi);
+
+      if (!(state.playing && state.weapon === "blade")) {
+        drawMech(points.playerFoot.x, points.playerFoot.y, C.player, C.playerHi, state.mode === "turn" ? "ne" : "right", state.playing);
+      }
+      drawMech(points.enemyFoot.x, points.enemyFoot.y, C.enemy, C.enemyHi, "left", false);
+
+      const duration = state.weapon === "blade" ? 1100 : state.weapon === "missile" ? 1400 : 900;
+      let progress = 0;
+      if (state.playing) {
+        progress = (performance.now() - state.start) / duration;
+        if (progress >= 1) {
+          state.playing = false;
+          progress = 1;
+        }
+      }
+      drawAttack(progress);
+      drawHud();
+      drawReadout();
+      requestAnimationFrame(draw);
+    }
+
+    function drawHud() {
+      ctx.save();
+      ctx.fillStyle = "rgba(5, 10, 18, 0.72)";
+      ctx.strokeStyle = "#2c4d70";
+      ctx.lineWidth = 1;
+      ctx.fillRect(18, 18, 246, 50);
+      ctx.strokeRect(18.5, 18.5, 245, 49);
+      drawLabel("RX-17 游隼  Lv1", 29, 39, "#fff4b0");
+      drawLabel("HP 120/120    EN 60/60", 29, 58, "#9fe8ff");
+      ctx.fillRect(696, 440, 246, 50);
+      ctx.strokeRect(696.5, 440.5, 245, 49);
+      drawLabel("失控训练机  Lv1", 707, 461, "#fff4b0");
+      drawLabel("HP 86/86     EN 36/60", 707, 480, "#ffb0b8");
+      ctx.restore();
+    }
+
+    document.querySelector("#weaponButtons").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-weapon]");
+      if (!button) return;
+      state.weapon = button.dataset.weapon;
+      setActive("weaponButtons", state.weapon, "weapon");
+      state.playing = false;
+    });
+    document.querySelector("#modeButtons").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-mode]");
+      if (!button) return;
+      state.mode = button.dataset.mode;
+      setActive("modeButtons", state.mode, "mode");
+      state.playing = false;
+    });
+    document.querySelector("#showDebug").addEventListener("change", (event) => {
+      state.showDebug = event.target.checked;
+    });
+    document.querySelector("#showGrid").addEventListener("change", (event) => {
+      state.showGrid = event.target.checked;
+    });
+    document.querySelector("#play").addEventListener("click", () => {
+      state.playing = true;
+      state.start = performance.now();
+    });
+    ["arc", "trail", "burst"].forEach((id) => {
+      const input = document.querySelector(`#${id}`);
+      const value = document.querySelector(`#${id}Val`);
+      input.addEventListener("input", () => {
+        state[id] = Number(input.value);
+        value.textContent = input.value;
+      });
+    });
+
+    draw();
+  </script>
+</body>
+</html>

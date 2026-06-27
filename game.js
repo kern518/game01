@@ -75,7 +75,18 @@ const assets = {
   missileFx: loadImage("assets/missile-fx.png"),
   icons: loadImage("assets/ui-icons.png"),
   battleBg: loadImage("assets/battle-bg.png"),
-  battleField: loadImage("assets/battle-bg-field.png"),
+  battleField: loadImage("assets/battle-bg-fixed-stage.png"),
+};
+
+const MECHA_FRAME = {
+  idle: 0,
+  ready: 1,
+  slashWindup: 2,
+  slash: 3,
+  ranged: 4,
+  hurt: 5,
+  guard: 6,
+  victory: 7,
 };
 
 const assetState = {
@@ -129,6 +140,8 @@ const defaultMap = [
   "#########....#####....######",
   "############################",
 ];
+const MAP_WORLD_WIDTH = defaultMap[0].length * TILE;
+const MAP_WORLD_HEIGHT = defaultMap.length * TILE;
 let map = loadCollisionMap();
 
 const enemies = [];
@@ -162,7 +175,7 @@ const trainingEnemies = [
     en: 36,
     atk: 11,
     defense: 10,
-    sprite: 4,
+    sprite: MECHA_FRAME.idle,
     ai: "scout",
     weaponLabel: "训练机炮",
     scrapReward: 1,
@@ -176,7 +189,7 @@ const trainingEnemies = [
     en: 44,
     atk: 14,
     defense: 12,
-    sprite: 7,
+    sprite: MECHA_FRAME.idle,
     ai: "artillery",
     weaponLabel: "肩载炮",
     scrapReward: 1,
@@ -190,7 +203,7 @@ const trainingEnemies = [
     en: 38,
     atk: 16,
     defense: 18,
-    sprite: 8,
+    sprite: MECHA_FRAME.idle,
     ai: "armor",
     weaponLabel: "重装冲击",
     scrapReward: 1,
@@ -232,9 +245,54 @@ const player = {
 const initialPlayer = { ...player };
 
 const weapons = {
-  pulse: { label: "脉冲机炮", damage: [14, 22], energy: 0, log: "机炮弹幕压住了敌机。" },
-  rail: { label: "磁轨炮", damage: [25, 35], energy: 16, log: "磁轨炮打出贯穿电弧。" },
-  repair: { label: "维修核心", damage: [12, 17], energy: -4, log: "维修核心补偿了能量回路。" },
+  pulse: { label: "脉冲机炮", damage: 18, energy: 0, log: "机炮弹幕压住了敌机。" },
+  rail: { label: "磁轨炮", damage: 30, energy: 16, log: "磁轨炮打出贯穿电弧。" },
+  repair: { label: "维修核心", damage: 14, energy: -4, log: "维修核心补偿了能量回路。" },
+};
+
+const battleSkillOrder = ["attack", "blade", "missile", "guard", "repair", "flee"];
+
+const battleSkills = {
+  attack: {
+    name: "主武器",
+    type: "attack",
+    weapon() {
+      return weapons[player.weapon] ?? weapons.pulse;
+    },
+    effect: "命中后按武器特性附加状态",
+  },
+  blade: {
+    name: "光刃",
+    type: "attack",
+    weapon: () => ({ label: "光刃突袭", damage: 26, energy: 10, log: "光刃切开敌方外甲。" }),
+    effect: "破甲 2 回合",
+  },
+  missile: {
+    name: "导弹",
+    type: "attack",
+    weapon: () => ({ label: "蜂巢导弹", damage: 35, energy: 20, log: "导弹群划过低空。" }),
+    effect: "高伤害，目标过热 1 回合",
+  },
+  guard: {
+    name: "防御",
+    type: "support",
+    cost: 0,
+    energyGain: 18,
+    effect: "本回合减伤并回能",
+  },
+  repair: {
+    name: "修理",
+    type: "support",
+    cost: 14,
+    heal: [22, 34],
+    effect: "恢复装甲",
+  },
+  flee: {
+    name: "逃跑",
+    type: "system",
+    cost: 0,
+    effect: "脱离战斗，无奖励",
+  },
 };
 
 const upgradeOptions = {
@@ -301,6 +359,8 @@ let trainingEnemyIndex = 0;
 let lastSavedAt = null;
 let demoCompletedAt = null;
 let devToolsReady = false;
+let devWindowReady = false;
+let devDragState = null;
 
 ensureDemoTeacher();
 
@@ -748,6 +808,8 @@ function nearbyInteractable() {
     const enemy = currentTrainingEnemy();
     return { kind: "battle", label: `E 出击：${enemy?.name ?? "敌机"}`, x: missionBattlePoint.x, y: missionBattlePoint.y };
   }
+  const enemy = nearbyPoints().map((point) => enemyAt(point.x, point.y)).find(Boolean);
+  if (enemy) return { kind: "battle", label: `E 交战：${enemy.name}`, x: enemy.x, y: enemy.y };
   const npc = nearbyPoints().map((point) => npcAt(point.x, point.y)).find(Boolean);
   if (npc) return { kind: "npc", label: `E 对话：${npc.speaker}`, x: npc.x, y: npc.y };
   const scrap = nearbyPoints().map((point) => scrapNodeAt(point.x, point.y)).find(Boolean);
@@ -755,18 +817,24 @@ function nearbyInteractable() {
   return null;
 }
 
-function interactWithMissionBattlePoint() {
+function interactWithBattleTarget() {
   const point = nearbyPoints().map((item) => missionBattlePointAt(item.x, item.y)).find(Boolean);
-  if (!point) return false;
-  const enemy = currentTrainingEnemy();
-  setComms("系统", `${enemy?.name ?? "敌机"} 信号锁定，游隼出击。`, 0);
-  launchBattle();
+  if (point) {
+    const enemy = currentTrainingEnemy();
+    setComms("系统", `${enemy?.name ?? "敌机"} 信号锁定，游隼出击。`, 0);
+    launchBattle();
+    return true;
+  }
+  const enemy = nearbyPoints().map((item) => enemyAt(item.x, item.y)).find(Boolean);
+  if (!enemy) return false;
+  setComms("系统", `${enemy.name} 信号锁定，游隼出击。`, 0);
+  startBattle(enemy);
   return true;
 }
 
 function interactWithNpc() {
   if (mode !== "map") return false;
-  if (interactWithMissionBattlePoint()) return true;
+  if (interactWithBattleTarget()) return true;
   const target = nearbyPoints().map((point) => npcAt(point.x, point.y)).find(Boolean);
   if (!target) {
     if (collectNearbyScrap()) return true;
@@ -831,6 +899,17 @@ function saveSelectedNpcText() {
   updateNpcEditor();
   setComms(npc.speaker, npc.text, npc.portrait);
   addLog(`${npc.label} 的对话已保存。`);
+}
+
+function persistSelectedNpcEditorInputs() {
+  const npc = selectedNpcInstance();
+  if (!npc) return false;
+  npc.speaker = ui.npcSpeakerInput?.value.trim() || npcTemplate(npc.type).speaker;
+  npc.text = ui.npcTextInput?.value.trim() || npcTemplate(npc.type).text;
+  npc.blocking = Boolean(ui.npcBlockingInput?.checked);
+  saveNpcLayout();
+  updateNpcEditor();
+  return true;
 }
 
 function previewSelectedNpcText() {
@@ -910,6 +989,7 @@ function initDevTools() {
     return;
   }
   ui.devTools.classList.remove("hidden");
+  initDevWindowControls();
   if (devToolsReady) {
     updateNpcEditor();
     return;
@@ -935,6 +1015,142 @@ function initDevTools() {
   updateNpcEditor();
 }
 
+function clampDevToolsPosition(left, top) {
+  if (!ui.devTools) return;
+  const parent = ui.devTools.parentElement;
+  const parentWidth = parent?.clientWidth || window.innerWidth;
+  const parentHeight = parent?.clientHeight || window.innerHeight;
+  const width = ui.devTools.offsetWidth;
+  const height = Math.min(ui.devTools.offsetHeight, parentHeight - 16);
+  const maxLeft = Math.max(8, parentWidth - width - 8);
+  const maxTop = Math.max(8, parentHeight - height - 8);
+  const nextLeft = Math.max(8, Math.min(left, maxLeft));
+  const nextTop = Math.max(8, Math.min(top, maxTop));
+  ui.devTools.style.left = `${Math.round(nextLeft)}px`;
+  ui.devTools.style.top = `${Math.round(nextTop)}px`;
+  ui.devTools.style.right = "auto";
+}
+
+function dockDevTools() {
+  if (!ui.devTools || window.matchMedia("(max-width: 860px)").matches) return;
+  const parent = ui.devTools.parentElement;
+  if (!parent) return;
+  const protectedArea = activeStageBounds(parent);
+  if (!protectedArea) return;
+  const gapLeft = protectedArea.left;
+  const gapRight = parent.clientWidth - protectedArea.right;
+  const width = ui.devTools.offsetWidth;
+  const top = Math.max(8, protectedArea.top + 8);
+  if (gapRight >= width + 16) {
+    clampDevToolsPosition(protectedArea.right + 8, top);
+    return;
+  }
+  if (gapLeft >= width + 16) {
+    clampDevToolsPosition(protectedArea.left - width - 8, top);
+    return;
+  }
+  clampDevToolsPosition(parent.clientWidth - width - 12, top);
+}
+
+function activeStageBounds(parent) {
+  if (!parent) return null;
+  if (mode === "map") {
+    const viewport = getMapViewport();
+    const canvasLeft = mapCanvas.offsetLeft;
+    const canvasTop = mapCanvas.offsetTop;
+    const left = canvasLeft + viewport.offsetX;
+    const top = canvasTop + viewport.offsetY;
+    return {
+      left,
+      top,
+      right: left + viewport.width,
+      bottom: top + viewport.height,
+    };
+  }
+  if (mode === "battle") {
+    const arena = document.querySelector(".battle-arena");
+    if (!arena) return null;
+    const parentRect = parent.getBoundingClientRect();
+    const arenaRect = arena.getBoundingClientRect();
+    const left = arenaRect.left - parentRect.left;
+    const top = arenaRect.top - parentRect.top;
+    return {
+      left,
+      top,
+      right: left + arenaRect.width,
+      bottom: top + arenaRect.height,
+    };
+  }
+  return null;
+}
+
+function resetDevToolsPosition() {
+  if (!ui.devTools) return;
+  ui.devTools.style.left = "";
+  ui.devTools.style.top = "";
+  ui.devTools.style.right = "";
+  requestAnimationFrame(dockDevTools);
+}
+
+function initDevWindowControls() {
+  if (!ui.devTools || devWindowReady) return;
+  devWindowReady = true;
+  const title = ui.devTools.querySelector(".dev-tools-title");
+  title?.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button")) return;
+    if (window.matchMedia("(max-width: 860px)").matches) return;
+    const rect = ui.devTools.getBoundingClientRect();
+    const parentRect = ui.devTools.parentElement.getBoundingClientRect();
+    devDragState = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      parentX: parentRect.left,
+      parentY: parentRect.top,
+    };
+    title.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  title?.addEventListener("pointermove", (event) => {
+    if (!devDragState || devDragState.pointerId !== event.pointerId) return;
+    clampDevToolsPosition(event.clientX - devDragState.parentX - devDragState.offsetX, event.clientY - devDragState.parentY - devDragState.offsetY);
+  });
+  const stopDrag = (event) => {
+    if (!devDragState || devDragState.pointerId !== event.pointerId) return;
+    devDragState = null;
+  };
+  title?.addEventListener("pointerup", stopDrag);
+  title?.addEventListener("pointercancel", stopDrag);
+  ui.devTools.querySelectorAll("[data-dev-window-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.dataset.devWindowAction;
+      if (action === "collapse") {
+        const collapsed = ui.devTools.classList.toggle("collapsed");
+        button.textContent = collapsed ? "展开" : "收起";
+        requestAnimationFrame(() => {
+          if (collapsed) {
+            dockDevTools();
+            return;
+          }
+          dockDevTools();
+        });
+      }
+      if (action === "reset") {
+        ui.devTools.classList.remove("collapsed");
+        ui.devTools.querySelector("[data-dev-window-action='collapse']").textContent = "收起";
+        resetDevToolsPosition();
+      }
+    });
+  });
+}
+
+function collapseDevToolsForEditing() {
+  if (!ui.devTools || window.matchMedia("(max-width: 860px)").matches) return;
+  ui.devTools.classList.add("collapsed");
+  ui.devTools.querySelector("[data-dev-window-action='collapse']").textContent = "展开";
+  requestAnimationFrame(dockDevTools);
+}
+
 function setDevMode(enabled) {
   DEV_MODE = enabled;
   document.body.classList.toggle("dev-mode", DEV_MODE);
@@ -948,6 +1164,7 @@ function setDevMode(enabled) {
     ui.devTools?.classList.add("hidden");
   } else {
     initDevTools();
+    requestAnimationFrame(dockDevTools);
   }
   updateNpcEditor();
   updateUi();
@@ -957,6 +1174,37 @@ function setDevMode(enabled) {
 function toggleDevMode() {
   setDevMode(!DEV_MODE);
   addLog(DEV_MODE ? "调试面板已开启。" : "调试面板已关闭。");
+}
+
+function closeSystemMenu() {
+  document.querySelector(".system-menu")?.removeAttribute("open");
+}
+
+function saveDevEdits() {
+  persistSelectedNpcEditorInputs();
+  saveCollisionMap();
+  saveNpcLayout();
+  saveDemo();
+  updateNpcEditor();
+  addLog(`编辑已保存：NPC ${npcs.length} 个，零件点 ${scrapNodes.length} 个。`);
+}
+
+function previewGameFromDev({ save = false } = {}) {
+  if (save) saveDevEdits();
+  setDevMode(false);
+  closePanel();
+  closeDialog();
+  hideBattleResult();
+  hideDemoCompleteModal();
+  if (mode === "battle") {
+    showMap({ preserveComms: true });
+  } else if (mode !== "map") {
+    showMap({ preserveComms: true });
+  } else {
+    updateUi();
+    drawMap();
+  }
+  addLog(save ? "已保存并切换到游戏预览。" : "已切换到游戏预览。");
 }
 
 function buildSaveData() {
@@ -1167,8 +1415,7 @@ function move(dx, dy) {
   if (blockedNpc) {
     queuedMove = null;
     bumpAnim = { dx, dy, start: performance.now(), duration: 120 };
-    dialogOpenNpcId = blockedNpc.id;
-    setComms(blockedNpc.speaker, blockedNpc.text, blockedNpc.portrait);
+    updateInteractHint();
     return;
   }
 
@@ -1194,12 +1441,6 @@ function continueHeldMove() {
 function handleArrival() {
   const nx = player.x;
   const ny = player.y;
-  const enemy = enemyAt(nx, ny);
-  if (enemy) startBattle(enemy);
-  if (missionBattlePointAt(nx, ny)) {
-    launchBattle();
-    return;
-  }
   if (tileAt(nx, ny) === "B") {
     player.hp = player.maxHp;
     player.en = player.maxEn;
@@ -1217,8 +1458,6 @@ function handleArrival() {
     setComms("机械师 阿棠", "维修站已整备完成。想强化机体的话，打开装备菜单进行机甲改装。", 2);
     addLog("维修站完成整备：装甲与能量已恢复。");
   }
-  const npc = npcs.find((item) => item.x === nx && item.y === ny);
-  if (npc) setComms(npc.speaker, npc.text, npc.portrait);
   collectScrapNode(scrapNodeAt(nx, ny));
   updateUi();
 }
@@ -1230,6 +1469,7 @@ function startBattle(enemy) {
   hangarLayer.classList.add("hidden");
   hideBattleResult();
   document.body.classList.remove("map-mode");
+  document.body.classList.add("battle-mode");
   if (questStage === "briefing") questStage = "active";
   setUnitStatus(player, "正常", 0);
   player.guard = false;
@@ -1241,6 +1481,11 @@ function startBattle(enemy) {
   addLog(`${currentEnemy.name} 锁定了你。`);
   updateUi();
   drawBattle();
+  if (DEV_MODE) {
+    collapseDevToolsForEditing();
+  } else {
+    requestAnimationFrame(dockDevTools);
+  }
 }
 
 function debugBattleEnemy() {
@@ -1284,7 +1529,7 @@ function triggerDebugEnemyMissile() {
   currentEnemy.en = currentEnemy.maxEn ?? 60;
   setUnitStatus(player, "正常", 0);
   setUnitStatus(currentEnemy, "正常", 0);
-  startBattleAnim({ actor: "enemy", target: "player", kind: "missile", text: "-24", label: "敌方导弹", x: 186, y: 72, duration: 1450, shake: 8 });
+  startBattleAnim({ actor: "enemy", target: "player", kind: "missile", text: "-24", label: "敌方导弹", ...battleAnimPosition("player"), duration: 1450, shake: 8 });
   setBattleButtons(true);
   setTimeout(() => setBattleButtons(false), 1580);
   addLog("战斗调试：播放敌方导弹轨迹。");
@@ -1298,7 +1543,7 @@ function triggerDebugEnemyCannon() {
   currentEnemy.en = currentEnemy.maxEn ?? 60;
   setUnitStatus(player, "正常", 0);
   setUnitStatus(currentEnemy, "正常", 0);
-  startBattleAnim({ actor: "enemy", target: "player", kind: "muzzle", text: "-16", label: "敌方机炮", x: 186, y: 72, duration: 1080, shake: 8 });
+  startBattleAnim({ actor: "enemy", target: "player", kind: "muzzle", text: "-16", label: "敌方机炮", ...battleAnimPosition("player"), duration: 1080, shake: 8 });
   setBattleButtons(true);
   setTimeout(() => setBattleButtons(false), 1220);
   addLog("战斗调试：播放敌方机炮轨迹。");
@@ -1407,8 +1652,113 @@ function continueAfterBattleResult() {
   }
 }
 
+function retreatBattle() {
+  if (mode !== "battle" || !currentEnemy || battleLocked) return;
+  const enemyName = currentEnemy.name;
+  currentEnemy = null;
+  player.guard = false;
+  setUnitStatus(player, "正常", 0);
+  battleAnim = null;
+  battleFx = { shake: 0, flash: 0, text: "", kind: "muzzle", x: 438, y: 88 };
+  battleLocked = true;
+  setBattleButtons(true);
+  setComms("驾驶员 洛辰", `已脱离 ${enemyName} 的交战范围。整备后可以重新挑战。`, 0);
+  addLog(`主动撤退：脱离 ${enemyName}，未获得奖励。`);
+  updateUi();
+  showBattleResult("主动撤退", ["脱离战斗", "未获得奖励", "任务进度不变"], "返回地图后可以整备或再次出击。");
+}
+
+function enemyDefenseCutForPreview() {
+  if (!currentEnemy) return 0;
+  const enemyDefense = (currentEnemy.defense ?? 0) + (currentEnemy.status === "防御中" ? 8 : 0) - (currentEnemy.status === "破甲" ? 6 : 0);
+  return Math.max(0, Math.floor(enemyDefense / 4));
+}
+
+function fixedAttackDamage(weapon) {
+  const statusBonus = currentEnemy?.status === "破甲" ? 6 : 0;
+  const defenseCut = enemyDefenseCutForPreview();
+  return Math.max(6, weapon.damage + player.level * 2 + statusBonus - defenseCut);
+}
+
+function battleSkillSpec(action) {
+  const skill = battleSkills[action];
+  if (!skill) return null;
+  const inBattle = mode === "battle" && Boolean(currentEnemy);
+  if (skill.type === "attack") {
+    const weapon = skill.weapon();
+    const damage = fixedAttackDamage(weapon);
+    return {
+      action,
+      name: action === "attack" ? weapon.label : skill.name,
+      meta: weapon.energy > 0 ? `EN -${weapon.energy}` : `EN +8`,
+      value: `伤害 ${damage}`,
+      effect: skill.effect,
+      cost: Math.max(0, weapon.energy),
+      disabledReason: inBattle && player.en < weapon.energy ? "能量不足" : "",
+    };
+  }
+  if (action === "guard") {
+    return {
+      action,
+      name: skill.name,
+      meta: `EN +${skill.energyGain}`,
+      value: "减伤 58%",
+      effect: skill.effect,
+      cost: 0,
+      disabledReason: "",
+    };
+  }
+  if (action === "repair") {
+    return {
+      action,
+      name: skill.name,
+      meta: `EN -${skill.cost}`,
+      value: `装甲 +${skill.heal[0]}-${skill.heal[1]}`,
+      effect: skill.effect,
+      cost: skill.cost,
+      disabledReason: inBattle && player.en < skill.cost ? "能量不足" : inBattle && player.hp >= player.maxHp ? "装甲已满" : "",
+    };
+  }
+  return {
+    action,
+    name: skill.name,
+    meta: "无消耗",
+    value: "撤离",
+    effect: skill.effect,
+    cost: 0,
+    disabledReason: "",
+  };
+}
+
+function renderBattleCommands() {
+  document.querySelectorAll("[data-action]").forEach((button) => {
+    const spec = battleSkillSpec(button.dataset.action);
+    if (!spec) return;
+    const disabled = battleLocked || Boolean(spec.disabledReason);
+    button.disabled = disabled;
+    button.classList.toggle("skill-unavailable", Boolean(spec.disabledReason) && !battleLocked);
+    button.title = spec.disabledReason
+      ? `${spec.name}：${spec.disabledReason}`
+      : `${spec.name} / ${spec.meta} / ${spec.value} / ${spec.effect}`;
+    button.innerHTML = `
+      <span class="skill-name">${spec.name}</span>
+      <span class="skill-meta">${spec.meta}</span>
+      <span class="skill-value">${spec.disabledReason && !battleLocked ? spec.disabledReason : spec.value}</span>
+    `;
+  });
+}
+
 function playerAction(action) {
   if (mode !== "battle" || !currentEnemy || battleLocked) return;
+  const spec = battleSkillSpec(action);
+  if (spec?.disabledReason) {
+    addLog(`${spec.name}无法执行：${spec.disabledReason}。`);
+    return;
+  }
+  if (action === "flee") {
+    retreatBattle();
+    return;
+  }
   player.guard = false;
   if (player.status === "防御中") setUnitStatus(player, "正常", 0);
 
@@ -1417,7 +1767,7 @@ function playerAction(action) {
     player.guard = true;
     setUnitStatus(player, "防御中", 1);
     player.en = Math.min(player.maxEn, player.en + 18);
-    startBattleAnim({ actor: "player", kind: "shield", text: "+EN", label: "防御姿态", x: 142, y: 72, duration: 520 });
+    startBattleAnim({ actor: "player", kind: "shield", text: "+EN", label: "防御姿态", ...battleAnimPosition("player"), duration: 520 });
     addLog("游隼架起盾场，能量回流。");
     updateUi();
     setTimeout(enemyTurn, 560);
@@ -1425,40 +1775,31 @@ function playerAction(action) {
   }
 
   if (action === "repair") {
-    if (player.en < 14) {
-      addLog("能量不足，维修核心没有启动。");
-      return;
-    }
+    const skill = battleSkills.repair;
     setBattleButtons(true);
-    player.en -= 14;
-    const fixed = rand(22, 34);
+    player.en -= skill.cost;
+    const fixed = rand(...skill.heal);
     player.hp = Math.min(player.maxHp, player.hp + fixed);
     setUnitStatus(player, "维修中", 1);
-    startBattleAnim({ actor: "player", kind: "repair", text: `+${fixed}`, label: "维修核心", x: 142, y: 72, duration: 560 });
+    startBattleAnim({ actor: "player", kind: "repair", text: `+${fixed}`, label: skill.name, ...battleAnimPosition("player"), duration: 560 });
     addLog(`纳米维修回复 ${fixed} 装甲。`);
     updateUi();
     setTimeout(enemyTurn, 600);
     return;
   }
 
-  const weapon = action === "missile" ? { label: "蜂巢导弹", damage: [28, 42], energy: 20, log: "导弹群划过低空。" } : action === "blade" ? { label: "光刃突袭", damage: [20, 31], energy: 10, log: "光刃切开敌方外甲。" } : weapons[player.weapon];
-  if (player.en < weapon.energy) {
-    addLog(`${weapon.label} 需要更多能量。`);
-    return;
-  }
+  const skill = battleSkills[action] ?? battleSkills.attack;
+  const weapon = skill.weapon();
 
   setBattleButtons(true);
   player.en = Math.min(player.maxEn, player.en - weapon.energy + (weapon.energy <= 0 ? 8 : 0));
   if (["missile"].includes(action) || player.weapon === "rail") setUnitStatus(currentEnemy, "过热", 1);
   if (action === "blade") setUnitStatus(currentEnemy, "破甲", 2);
-  const enemyDefense = (currentEnemy.defense ?? 0) + (currentEnemy.status === "防御中" ? 8 : 0) - (currentEnemy.status === "破甲" ? 6 : 0);
-  const defenseCut = Math.max(0, Math.floor(enemyDefense / 4));
-  const statusBonus = currentEnemy.status === "破甲" ? 6 : 0;
-  const damage = Math.max(6, rand(...weapon.damage) + player.level * 2 + statusBonus - defenseCut);
+  const damage = fixedAttackDamage(weapon);
   currentEnemy.hp = Math.max(0, currentEnemy.hp - damage);
   const kind = action === "missile" ? "missile" : action === "blade" ? "slash" : player.weapon === "rail" ? "rail" : "muzzle";
   const duration = kind === "slash" ? 1100 : kind === "missile" ? 1450 : kind === "muzzle" ? 1080 : 760;
-  startBattleAnim({ actor: "player", target: "enemy", kind, text: `-${damage}`, label: weapon.label, x: 404, y: 64, duration, shake: 8 });
+  startBattleAnim({ actor: "player", target: "enemy", kind, text: `-${damage}`, label: weapon.label, ...battleAnimPosition("enemy"), duration, shake: 8 });
   addLog(`${weapon.log} 造成 ${damage} 伤害。`);
   updateUi();
 
@@ -1474,7 +1815,7 @@ function enemyTurn() {
   if (currentEnemy.ai === "armor" && currentEnemy.hp > 0 && currentEnemy.en < 54 && Math.random() > 0.55) {
     currentEnemy.en = Math.min(60, currentEnemy.en + 14);
     setUnitStatus(currentEnemy, "防御中", 1);
-    startBattleAnim({ actor: "enemy", kind: "shield", text: "+EN", label: "装甲防御", x: 438, y: 232, duration: 560 });
+    startBattleAnim({ actor: "enemy", kind: "shield", text: "+EN", label: "装甲防御", ...battleAnimPosition("enemy"), duration: 560 });
     addLog(`${currentEnemy.name} 展开重装防御，能量回流。`);
     updateUi();
     tickUnitStatus(player);
@@ -1495,7 +1836,7 @@ function enemyTurn() {
   player.hp = Math.max(0, player.hp - damage);
   const animKind = charged && currentEnemy.ai === "artillery" ? "missile" : charged ? "explosion" : "muzzle";
   const label = charged ? currentEnemy.weaponLabel || "敌机重击" : "敌机开火";
-  startBattleAnim({ actor: "enemy", target: "player", kind: animKind, text: `-${damage}`, label, x: 186, y: 72, duration: animKind === "missile" ? 1450 : animKind === "muzzle" ? 1080 : 760, shake: 8 });
+  startBattleAnim({ actor: "enemy", target: "player", kind: animKind, text: `-${damage}`, label, ...battleAnimPosition("player"), duration: animKind === "missile" ? 1450 : animKind === "muzzle" ? 1080 : 760, shake: 8 });
   addLog(`${currentEnemy.name}${charged ? `释放${label}` : "开火"}，装甲损失 ${damage}。`);
   updateUi();
   tickUnitStatus(currentEnemy);
@@ -1510,9 +1851,7 @@ function enemyTurn() {
 
 function setBattleButtons(disabled) {
   battleLocked = disabled;
-  document.querySelectorAll("[data-action]").forEach((button) => {
-    button.disabled = disabled;
-  });
+  renderBattleCommands();
 }
 
 function startBattleAnim({ actor, target = "", kind, text, label = "", x, y, duration = 560, shake = 0 }) {
@@ -1531,15 +1870,83 @@ function startBattleAnim({ actor, target = "", kind, text, label = "", x, y, dur
 }
 
 const battleLayout = {
-  topPanel: { x: 28, y: 8, w: 294, h: 52 },
-  bottomPanel: { x: 318, y: 300, w: 294, h: 52 },
+  topPanel: { x: 16, y: 10, w: 250, h: 46 },
+  bottomPanel: { x: 374, y: 302, w: 250, h: 46 },
   actionPanel: { x: 260, y: 157, w: 120, h: 40 },
-  playerLane: { y: 78, floor: 176 },
-  enemyLane: { y: 202, floor: 284 },
-  playerHome: { x: 138, y: 186 },
-  enemyHome: { x: 492, y: 274 },
+  playerHome: { x: 165, y: 255 },
+  enemyHome: { x: 475, y: 112 },
+  playerWeaponOffset: { x: 54, y: -66 },
+  enemyWeaponOffset: { x: -54, y: -66 },
+  playerHitOffset: { x: 16, y: -84 },
+  enemyHitOffset: { x: -16, y: -84 },
   unitSize: 118,
 };
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function battlePoint(anchor, offset) {
+  return {
+    x: anchor.x + offset.x,
+    y: anchor.y + offset.y,
+  };
+}
+
+function battleActorHome(actor) {
+  return actor === "enemy" ? battleLayout.enemyHome : battleLayout.playerHome;
+}
+
+function battleWeaponPoint(actor, laneOffset = 0) {
+  const anchor = battleActorHome(actor);
+  const offset = actor === "enemy" ? battleLayout.enemyWeaponOffset : battleLayout.playerWeaponOffset;
+  return { x: anchor.x + offset.x, y: anchor.y + offset.y + laneOffset };
+}
+
+function battleHitPoint(actor, laneOffset = 0) {
+  const anchor = battleActorHome(actor);
+  const offset = actor === "enemy" ? battleLayout.enemyHitOffset : battleLayout.playerHitOffset;
+  return { x: anchor.x + offset.x, y: anchor.y + offset.y + laneOffset };
+}
+
+function battleAnimPosition(actor, yOffset = -82) {
+  const anchor = battleActorHome(actor);
+  return { x: anchor.x, y: anchor.y + yOffset };
+}
+
+function battleRoute(anim, laneOffset = 0) {
+  const attacker = anim.actor === "enemy" ? "enemy" : "player";
+  const target = anim.target === "player" ? "player" : "enemy";
+  const start = battleWeaponPoint(attacker);
+  const end = battleHitPoint(target);
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const axis = { x: dx / length, y: dy / length };
+  const perp = { x: -axis.y, y: axis.x };
+  return {
+    start: { x: start.x + perp.x * laneOffset, y: start.y + perp.y * laneOffset },
+    end: { x: end.x + perp.x * laneOffset, y: end.y + perp.y * laneOffset },
+    axis,
+    perp,
+    angle: Math.atan2(dy, dx),
+  };
+}
+
+function pointOnLine(start, end, t) {
+  return {
+    x: lerp(start.x, end.x, t),
+    y: lerp(start.y, end.y, t),
+  };
+}
+
+function pointOnQuadratic(start, control, end, t) {
+  const inv = 1 - t;
+  return {
+    x: inv * inv * start.x + 2 * inv * t * control.x + t * t * end.x,
+    y: inv * inv * start.y + 2 * inv * t * control.y + t * t * end.y,
+  };
+}
 
 function showHangar() {
   mode = "hangar";
@@ -1547,7 +1954,7 @@ function showHangar() {
   battleLayer.classList.add("hidden");
   mapCanvas.classList.add("hidden");
   hangarLayer.classList.remove("hidden");
-  document.body.classList.remove("map-mode");
+  document.body.classList.remove("map-mode", "battle-mode");
   ui.speech.textContent = "机库待命。检查机体状态后可以直接出击。";
   document.querySelector("#areaLabel").textContent = "基地机库";
   updateUi();
@@ -1560,6 +1967,7 @@ function showMap(options = {}) {
   battleLayer.classList.add("hidden");
   hangarLayer.classList.add("hidden");
   mapCanvas.classList.remove("hidden");
+  document.body.classList.remove("battle-mode");
   document.body.classList.add("map-mode");
   document.querySelector("#areaLabel").textContent = "旧城区外围";
   if (!options.preserveComms) {
@@ -1665,6 +2073,7 @@ function updateUi() {
   }
   updateSaveMeta();
   updateGuideLine();
+  renderBattleCommands();
 }
 
 function upgradeMech(type) {
@@ -1695,7 +2104,7 @@ function updateSaveMeta() {
 
 function updateGuideLine() {
   if (!ui.guideLine) return;
-  let text = "WASD / 方向键移动，靠近 NPC 按 E 或点击交互。";
+  let text = "WASD / 方向键移动，靠近目标按 E 交互。";
   if (mode === "hangar") {
     text = "点“大地图”进入外勤；机库可整备，装备菜单可改装机体。";
   } else if (mode === "battle") {
@@ -1703,11 +2112,11 @@ function updateGuideLine() {
   } else if (demoComplete || questStage === "complete") {
     text = "Demo 闭环完成。打开机体查看强化，或在装备菜单继续改装。";
   } else if (questStage === "briefing") {
-    text = "靠近老师按 E，或直接点击老师接取训练任务。";
+    text = "靠近老师后按 E 接取训练任务。";
   } else if (questStage === "active") {
-    text = "前往地图上的敌机标记，靠近后按 E 或点击进入训练战。";
+    text = "前往地图上的敌机标记，靠近后按 E 进入训练战。";
   } else if (questStage === "report") {
-    text = "带 3 个零件回到老师旁，按 E 或点击老师交付任务。";
+    text = "带 3 个零件回到老师旁，按 E 交付任务。";
   }
   ui.guideLine.textContent = text;
   updateInteractHint();
@@ -1744,19 +2153,33 @@ function drawSprite(ctx, image, index, cell, x, y, w, h, facing = 1) {
 }
 
 function drawBattleMech(ctx, x, y, size, sprite, facing = 1) {
-  if (drawSheetSprite(ctx, assets.battleMechs, sprite % 4, Math.floor(sprite / 4), 256, 256, x, y, size, size, facing)) return;
+  const frame = normalizeMechaFrame(sprite);
+  if (drawSheetSprite(ctx, assets.battleMechs, frame % 4, Math.floor(frame / 4), 256, 256, x, y, size, size, facing)) return true;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(facing, 1);
   ctx.fillStyle = "#42d6a4";
   ctx.fillRect(-size / 4, -size / 2, size / 2, size);
   ctx.restore();
+  return false;
+}
+
+function normalizeMechaFrame(sprite) {
+  const totalFrames = mechaFrameCount();
+  const frame = Number.isInteger(sprite) ? sprite : MECHA_FRAME.idle;
+  return Math.max(0, Math.min(totalFrames - 1, frame));
+}
+
+function mechaFrameCount() {
+  if (!assets.battleMechs.complete || !assets.battleMechs.naturalWidth) return 8;
+  return Math.max(1, Math.floor(assets.battleMechs.naturalWidth / 256) * Math.floor(assets.battleMechs.naturalHeight / 256));
 }
 
 function drawAnchoredBattleMech(ctx, x, footY, size, sprite, facing = 1, flash = false) {
   if (assets.battleMechs.complete && assets.battleMechs.naturalWidth) {
-    const col = sprite % 4;
-    const row = Math.floor(sprite / 4);
+    const frame = normalizeMechaFrame(sprite);
+    const col = frame % 4;
+    const row = Math.floor(frame / 4);
     const drawW = size;
     const drawH = size;
     const dx = Math.round(-drawW / 2);
@@ -1839,7 +2262,7 @@ function drawSheetSprite(ctx, image, col, row, cellW, cellH, x, y, w, h, facing 
 }
 
 function drawEnemyMarker(ctx, x, y, sprite) {
-  if (drawBattleMech(ctx, x, y - 2, 48, sprite % 4, -1)) {
+  if (drawBattleMech(ctx, x, y - 2, 48, sprite, -1)) {
     drawAlertMarker(ctx, x, y);
     return;
   }
@@ -1984,12 +2407,16 @@ function drawPortraitCanvas(ctx, index) {
 }
 
 function drawMap() {
+  resizeMapCanvasToLayout();
   const now = performance.now();
   mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
   const playerPos = getPlayerDrawPosition(now);
   const camera = getCamera(playerPos);
+  const viewport = getMapViewport();
+  mapCtx.save();
+  mapCtx.setTransform(viewport.scale, 0, 0, viewport.scale, viewport.offsetX, viewport.offsetY);
   if (assets.mapBg.complete && assets.mapBg.naturalWidth) {
-    mapCtx.drawImage(assets.mapBg, -camera.x, -camera.y, mapCanvas.width, mapCanvas.height);
+    mapCtx.drawImage(assets.mapBg, -camera.x, -camera.y, MAP_WORLD_WIDTH, MAP_WORLD_HEIGHT);
   } else {
     for (let y = 0; y < map.length; y += 1) {
       for (let x = 0; x < map[y].length; x += 1) {
@@ -2066,6 +2493,7 @@ function drawMap() {
     },
   });
   actors.sort((a, b) => a.y - b.y).forEach((actor) => actor.draw());
+  mapCtx.restore();
   const help = showNpcDebug
     ? `NPC 摆放：${npcs.length} 个 / 点击放置 / Shift 删除`
     : showScrapDebug
@@ -2083,6 +2511,19 @@ function drawMap() {
     mapCtx.font = "12px Microsoft YaHei, sans-serif";
     mapCtx.fillText(help, 18, 25);
   }
+}
+
+function getMapViewport() {
+  const scale = Math.min(mapCanvas.width / MAP_WORLD_WIDTH, mapCanvas.height / MAP_WORLD_HEIGHT);
+  const width = MAP_WORLD_WIDTH * scale;
+  const height = MAP_WORLD_HEIGHT * scale;
+  return {
+    scale,
+    offsetX: Math.round((mapCanvas.width - width) / 2),
+    offsetY: Math.round((mapCanvas.height - height) / 2),
+    width,
+    height,
+  };
 }
 
 function drawCollisionOverlay(camera) {
@@ -2195,8 +2636,11 @@ function getMapTileFromPointer(event) {
     y: player.y * TILE + TILE / 2 + 4,
   };
   const camera = getCamera(playerPos);
-  const worldX = (event.clientX - rect.left) * scaleX + camera.x;
-  const worldY = (event.clientY - rect.top) * scaleY + camera.y;
+  const viewport = getMapViewport();
+  const canvasX = (event.clientX - rect.left) * scaleX;
+  const canvasY = (event.clientY - rect.top) * scaleY;
+  const worldX = (canvasX - viewport.offsetX) / viewport.scale + camera.x;
+  const worldY = (canvasY - viewport.offsetY) / viewport.scale + camera.y;
   return {
     x: Math.floor(worldX / TILE),
     y: Math.floor(worldY / TILE),
@@ -2291,7 +2735,7 @@ function drawBattle() {
 function drawBattleStage(ctx) {
   if (assets.battleField.complete && assets.battleField.naturalWidth) {
     ctx.drawImage(assets.battleField, 0, 0, battleCanvas.width, battleCanvas.height);
-    ctx.fillStyle = "rgba(3, 8, 18, 0.3)";
+    ctx.fillStyle = "rgba(3, 8, 18, 0.16)";
     ctx.fillRect(0, 0, battleCanvas.width, battleCanvas.height);
     drawBattleLaneFocus(ctx);
     return;
@@ -2308,19 +2752,33 @@ function drawBattleStage(ctx) {
 
 function drawBattleLaneFocus(ctx) {
   ctx.save();
-  ctx.fillStyle = "rgba(255, 255, 255, 0.035)";
-  ctx.fillRect(0, battleLayout.playerLane.y + 18, battleCanvas.width, 64);
-  ctx.fillRect(0, battleLayout.enemyLane.y + 6, battleCanvas.width, 70);
-  ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
-  ctx.fillRect(0, 0, battleCanvas.width, battleLayout.topPanel.y + battleLayout.topPanel.h + 2);
-  ctx.fillRect(0, battleLayout.bottomPanel.y + battleLayout.bottomPanel.h + 1, battleCanvas.width, battleCanvas.height);
-  ctx.strokeStyle = "rgba(88, 199, 255, 0.35)";
-  ctx.lineWidth = 1;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.18)";
+  ctx.fillRect(0, 0, battleCanvas.width, battleLayout.topPanel.y + battleLayout.topPanel.h + 4);
+  ctx.fillRect(0, battleLayout.bottomPanel.y + battleLayout.bottomPanel.h + 2, battleCanvas.width, battleCanvas.height);
+  drawBattlePad(ctx, battleLayout.playerHome.x, battleLayout.playerHome.y, 94, "#58c7ff");
+  drawBattlePad(ctx, battleLayout.enemyHome.x, battleLayout.enemyHome.y, 94, "#ffef98");
+  ctx.restore();
+}
+
+function drawBattlePad(ctx, x, footY, width, color) {
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(footY - 4));
+  ctx.scale(1, 0.36);
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = "rgba(6, 10, 22, 0.72)";
+  ctx.lineWidth = 7;
   ctx.beginPath();
-  ctx.moveTo(0, battleLayout.playerHome.y - 3);
-  ctx.lineTo(battleCanvas.width, battleLayout.playerHome.y - 3);
-  ctx.moveTo(0, battleLayout.enemyHome.y - 3);
-  ctx.lineTo(battleCanvas.width, battleLayout.enemyHome.y - 3);
+  ctx.ellipse(0, 0, width * 0.42, width * 0.42, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.55;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, width * 0.38, width * 0.38, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 0.35;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, width * 0.24, width * 0.24, 0, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
 }
@@ -2375,32 +2833,32 @@ function drawPixelArrow(ctx, x, y, dir) {
 function drawBattleStatusPanel(ctx, box, unit) {
   ctx.save();
   ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = "rgba(0, 0, 0, 0.34)";
-  ctx.fillRect(box.x + 3, box.y + 3, box.w, box.h);
-  ctx.fillStyle = "rgba(57, 64, 196, 0.9)";
+  ctx.fillStyle = "rgba(2, 8, 18, 0.68)";
+  ctx.fillRect(box.x + 2, box.y + 3, box.w, box.h);
+  ctx.fillStyle = "rgba(6, 19, 35, 0.86)";
   ctx.fillRect(box.x, box.y, box.w, box.h);
-  ctx.fillStyle = "rgba(104, 128, 255, 0.22)";
-  ctx.fillRect(box.x + 4, box.y + 4, box.w - 8, 8);
-  ctx.strokeStyle = "#eef4ff";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
-  ctx.strokeStyle = "#252b79";
+  ctx.fillStyle = "rgba(88, 199, 255, 0.12)";
+  ctx.fillRect(box.x, box.y, box.w, 10);
+  ctx.strokeStyle = "rgba(88, 199, 255, 0.86)";
   ctx.lineWidth = 1;
-  ctx.strokeRect(box.x + 3.5, box.y + 3.5, box.w - 7, box.h - 7);
+  ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+  ctx.strokeStyle = "rgba(255, 239, 152, 0.72)";
+  ctx.beginPath();
+  ctx.moveTo(box.x + box.w - 26, box.y + 0.5);
+  ctx.lineTo(box.x + box.w - 1, box.y + 0.5);
+  ctx.stroke();
 
-  ctx.fillStyle = "#fff4a0";
-  ctx.font = "bold 12px Microsoft YaHei, sans-serif";
-  drawBattleText(ctx, `${unit.name}  Lv ${unit.level}`, box.x + 8, box.y + 15, "#fff4a0");
+  ctx.font = "bold 11px Microsoft YaHei, sans-serif";
+  drawBattleText(ctx, `${unit.name}  Lv ${unit.level}`, box.x + 8, box.y + 14, "#fff4a0");
 
-  ctx.font = "bold 10px Microsoft YaHei, sans-serif";
-  drawBattleText(ctx, `装甲 ${unit.hp}/${unit.maxHp}`, box.x + 8, box.y + 29, "#ffffff");
-  drawMiniBar(ctx, box.x + 80, box.y + 22, 66, 6, unit.hp / unit.maxHp, "#ff6e4a");
-  drawBattleText(ctx, `能量 ${unit.en}/${unit.maxEn}`, box.x + 8, box.y + 42, "#bcd7ff");
-  drawMiniBar(ctx, box.x + 80, box.y + 35, 66, 6, unit.en / unit.maxEn, "#58c7ff");
-  drawBattleText(ctx, `攻${unit.atk}`, box.x + 158, box.y + 29, "#eef4ff");
-  drawBattleText(ctx, `防${unit.defense}`, box.x + 204, box.y + 29, "#eef4ff");
-  drawBattleText(ctx, unit.status === "正常" ? "正常" : unit.status, box.x + 246, box.y + 29, unit.status === "正常" ? "#d9f7ff" : "#ffef98");
-  drawBattleText(ctx, `武器 ${unit.weapon}`, box.x + 158, box.y + 42, "#ffffff");
+  ctx.font = "bold 9px Microsoft YaHei, sans-serif";
+  drawBattleText(ctx, `装甲 ${unit.hp}/${unit.maxHp}`, box.x + 8, box.y + 28, "#eef4ff");
+  drawMiniBar(ctx, box.x + 70, box.y + 21, 74, 5, unit.hp / unit.maxHp, "#ff6e4a");
+  drawBattleText(ctx, `能量 ${unit.en}/${unit.maxEn}`, box.x + 8, box.y + 40, "#bcd7ff");
+  drawMiniBar(ctx, box.x + 70, box.y + 33, 74, 5, unit.en / unit.maxEn, "#58c7ff");
+  drawBattleText(ctx, `攻${unit.atk}`, box.x + 154, box.y + 28, "#eef4ff");
+  drawBattleText(ctx, `防${unit.defense}`, box.x + 190, box.y + 28, "#eef4ff");
+  drawBattleText(ctx, unit.status === "正常" ? "正常" : unit.status, box.x + 154, box.y + 40, unit.status === "正常" ? "#58f0ff" : "#ffef98");
   ctx.restore();
 }
 
@@ -2427,18 +2885,29 @@ function drawMiniBar(ctx, x, y, w, h, ratio, color) {
 }
 
 function getPlayerMechaFrame() {
-  if (!battleAnim || battleAnim.actor !== "player") return 0;
-  if (battleAnim.kind === "slash") return 3;
-  if (["muzzle", "missile", "rail"].includes(battleAnim.kind)) return 4;
-  if (["shield", "repair"].includes(battleAnim.kind)) return 6;
-  return 1;
+  if (!battleAnim || battleAnim.actor !== "player") return MECHA_FRAME.idle;
+  if (battleAnim.kind === "slash") return MECHA_FRAME.slash;
+  if (["muzzle", "missile", "rail"].includes(battleAnim.kind)) return MECHA_FRAME.ranged;
+  if (["shield", "repair"].includes(battleAnim.kind)) return MECHA_FRAME.guard;
+  return MECHA_FRAME.ready;
+}
+
+function resizeMapCanvasToLayout() {
+  const rect = mapCanvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  const nextWidth = Math.max(640, Math.round(rect.width));
+  const nextHeight = Math.max(360, Math.round(rect.height));
+  if (mapCanvas.width === nextWidth && mapCanvas.height === nextHeight) return;
+  mapCanvas.width = nextWidth;
+  mapCanvas.height = nextHeight;
+  mapCtx.imageSmoothingEnabled = false;
 }
 
 function getEnemyMechaFrame() {
-  const idleFrame = currentEnemy?.sprite ?? 1;
+  const idleFrame = currentEnemy?.sprite ?? MECHA_FRAME.idle;
   if (!battleAnim) return idleFrame;
-  if (battleAnim.target === "enemy") return 5;
-  if (battleAnim.actor === "enemy") return battleAnim.kind === "explosion" ? 3 : 4;
+  if (battleAnim.target === "enemy") return MECHA_FRAME.hurt;
+  if (battleAnim.actor === "enemy") return battleAnim.kind === "explosion" ? MECHA_FRAME.slash : MECHA_FRAME.ranged;
   return idleFrame;
 }
 
@@ -2458,18 +2927,21 @@ function getBattlePose(now) {
 
   const t = Math.min(1, (now - battleAnim.start) / battleAnim.duration);
   if (battleAnim.actor === "player" && battleAnim.kind === "slash") {
+    const strike = battlePoint(battleLayout.enemyHome, { x: -42, y: 2 });
     if (t < 0.16) {
       pose.playerX = battleLayout.playerHome.x - Math.sin((t / 0.16) * Math.PI) * 10;
       pose.playerY = battleLayout.playerHome.y + idle;
     } else if (t < 0.44) {
-      pose.playerX = lerp(battleLayout.playerHome.x + 4, 536, easeOut((t - 0.16) / 0.28));
-      pose.playerY = battleLayout.playerHome.y - Math.sin(((t - 0.16) / 0.28) * Math.PI) * 5;
+      const dashT = easeOut((t - 0.16) / 0.28);
+      pose.playerX = lerp(battleLayout.playerHome.x + 4, strike.x, dashT);
+      pose.playerY = lerp(battleLayout.playerHome.y, strike.y, dashT) - Math.sin(dashT * Math.PI) * 8;
     } else if (t < 0.72) {
-      pose.playerX = lerp(126, battleLayout.enemyHome.x - 18, easeOut((t - 0.44) / 0.28));
-      pose.playerY = battleLayout.enemyHome.y;
+      pose.playerX = strike.x + Math.sin(((t - 0.44) / 0.28) * Math.PI) * 8;
+      pose.playerY = strike.y;
     } else {
-      pose.playerX = lerp(battleLayout.enemyHome.x - 18, battleLayout.playerHome.x, easeInOut((t - 0.72) / 0.28));
-      pose.playerY = lerp(battleLayout.enemyHome.y, battleLayout.playerHome.y, easeInOut((t - 0.72) / 0.28));
+      const backT = easeInOut((t - 0.72) / 0.28);
+      pose.playerX = lerp(strike.x, battleLayout.playerHome.x, backT);
+      pose.playerY = lerp(strike.y, battleLayout.playerHome.y, backT);
     }
   } else if (battleAnim.actor === "player" && ["muzzle", "missile", "rail"].includes(battleAnim.kind)) {
     pose.playerX += Math.sin(t * Math.PI) * 7;
@@ -2502,118 +2974,102 @@ function easeOut(t) {
 }
 
 function missileBattlePath(anim, laneOffset = 0) {
-  const fromEnemy = anim.actor === "enemy";
-  const upperY = Math.round(battleLayout.playerHome.y - battleLayout.unitSize * 0.44 + laneOffset);
-  const lowerY = Math.round(battleLayout.enemyHome.y - battleLayout.unitSize * 0.46 + laneOffset);
-  const edgePad = 18;
-  if (fromEnemy) {
-    return {
-      facing: -1,
-      segmentA: {
-        start: { x: battleLayout.enemyHome.x - 56, y: lowerY },
-        end: { x: edgePad, y: lowerY },
-      },
-      segmentB: {
-        start: { x: battleCanvas.width - edgePad, y: upperY },
-        end: { x: battleLayout.playerHome.x + 58, y: upperY },
-      },
-    };
-  }
-  return {
-    facing: 1,
-    segmentA: {
-      start: { x: battleLayout.playerHome.x + 56, y: upperY },
-      end: { x: battleCanvas.width - edgePad, y: upperY },
-    },
-    segmentB: {
-      start: { x: edgePad, y: lowerY },
-      end: { x: battleLayout.enemyHome.x - 58, y: lowerY },
-    },
-  };
+  return battleRoute(anim, laneOffset);
 }
 
 function drawTripleMissiles(ctx, anim, progress) {
-  const lanes = [-8, 0, 8];
-  const launchDelay = 0.12;
-  const flightWindow = 0.74;
-  const routeSplit = 0.48;
+  const lanes = [-10, 0, 10];
+  const launchDelay = 0.1;
+  const flightWindow = 0.78;
   lanes.forEach((offset, index) => {
     const path = missileBattlePath(anim, offset);
-    const local = (progress - 0.08 - index * launchDelay) / flightWindow;
+    const local = (progress - 0.06 - index * launchDelay) / flightWindow;
     if (local < 0) {
-      if (progress > index * 0.05 && progress < 0.18 + index * 0.05) {
-        drawMissileFx(ctx, 5, path.segmentA.start.x, path.segmentA.start.y, 42, path.facing);
+      if (progress > index * 0.04 && progress < 0.16 + index * 0.04) {
+        drawMissileLaunchFlare(ctx, path.start, path.angle);
       }
       return;
     }
-    const t = Math.min(1, local);
-    const segment = t < routeSplit ? path.segmentA : path.segmentB;
-    const segmentT = t < routeSplit ? t / routeSplit : (t - routeSplit) / (1 - routeSplit);
-    const x = Math.round(lerp(segment.start.x, segment.end.x, easeOut(segmentT)));
-    const y = segment.start.y;
+    const t = clamp01(local);
+    const lift = anim.actor === "enemy" ? -24 - index * 4 : -38 - index * 4;
+    const control = {
+      x: (path.start.x + path.end.x) / 2 + path.perp.x * (12 - index * 8),
+      y: (path.start.y + path.end.y) / 2 + lift,
+    };
+    const point = pointOnQuadratic(path.start, control, path.end, easeInOut(t));
+    const tangentPoint = pointOnQuadratic(path.start, control, path.end, clamp01(t + 0.04));
+    const angle = Math.atan2(tangentPoint.y - point.y, tangentPoint.x - point.x);
     if (local <= 1) {
-      drawMissileFx(ctx, 2, x - path.facing * 24, y + 1, 42, path.facing);
-      drawMissileFx(ctx, index % 2, x, y, 40, path.facing);
-      if (t > routeSplit && t < routeSplit + 0.08) {
-        drawMissileFx(ctx, 5, path.segmentB.start.x, path.segmentB.start.y, 38, path.facing);
-      }
+      drawMissileTrail(ctx, point, angle, 34 + index * 4);
+      drawAngledMissile(ctx, point, angle, 30);
     }
     if (local > 0.96 && local < 1.26) {
-      const boomFrame = local > 1 ? 4 : 3;
-      drawMissileFx(ctx, boomFrame, path.segmentB.end.x + path.facing * 10, path.segmentB.end.y + 2, 58 + index * 8, path.facing);
+      drawCannonImpact(ctx, path.end.x + path.axis.x * 8, path.end.y + path.axis.y * 8, index + 2);
+      drawEffect(ctx, "explosion", path.end.x - 24, path.end.y - 24, 56 + index * 8, path.axis.x >= 0 ? 1 : -1);
     }
   });
 }
 
 function drawCannonBurst(ctx, anim, progress) {
-  const lanes = [-5, -2, 1, 4, 7];
-  const launchDelay = 0.075;
-  const flightWindow = 0.62;
-  const routeSplit = 0.46;
+  const lanes = [-7, -3, 2, 7];
+  const launchDelay = 0.065;
+  const flightWindow = 0.56;
   lanes.forEach((offset, index) => {
     const path = missileBattlePath(anim, offset);
     const local = (progress - 0.08 - index * launchDelay) / flightWindow;
     if (local < 0) {
       if (progress > index * 0.035 && progress < 0.14 + index * 0.035) {
-        drawCannonMuzzle(ctx, path.segmentA.start.x, path.segmentA.start.y, path.facing);
+        drawCannonMuzzle(ctx, path.start.x, path.start.y, path.angle);
       }
       return;
     }
-    const t = Math.min(1, local);
-    const segment = t < routeSplit ? path.segmentA : path.segmentB;
-    const segmentT = t < routeSplit ? t / routeSplit : (t - routeSplit) / (1 - routeSplit);
-    const x = Math.round(lerp(segment.start.x, segment.end.x, easeOut(segmentT)));
-    const y = segment.start.y;
+    const t = clamp01(local);
+    const point = pointOnLine(path.start, path.end, easeOut(t));
     if (local <= 1) {
-      drawCannonBullet(ctx, x, y, path.facing, index);
-      if (t > routeSplit && t < routeSplit + 0.075) {
-        drawCannonMuzzle(ctx, path.segmentB.start.x, path.segmentB.start.y, path.facing);
-      }
+      drawCannonTrail(ctx, path.start, point, path.angle, index);
+      drawCannonBullet(ctx, point.x, point.y, path.angle, index);
     }
     if (local > 0.9 && local < 1.12) {
-      drawCannonImpact(ctx, path.segmentB.end.x + path.facing * 8, path.segmentB.end.y, index);
+      drawCannonImpact(ctx, path.end.x + path.axis.x * 8, path.end.y + path.axis.y * 8, index);
     }
   });
 }
 
-function drawCannonMuzzle(ctx, x, y, facing) {
+function drawCannonMuzzle(ctx, x, y, angle) {
   ctx.save();
   ctx.translate(Math.round(x), Math.round(y));
-  ctx.scale(facing, 1);
+  ctx.rotate(angle);
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = "rgba(255, 239, 152, 0.9)";
-  ctx.fillRect(-2, -5, 16, 10);
+  ctx.fillRect(-4, -5, 18, 10);
   ctx.fillStyle = "rgba(88, 199, 255, 0.65)";
-  ctx.fillRect(6, -8, 10, 16);
+  ctx.fillRect(6, -8, 12, 16);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(2, -2, 8, 4);
   ctx.restore();
 }
 
-function drawCannonBullet(ctx, x, y, facing, index) {
+function drawCannonTrail(ctx, start, point, angle, index) {
+  ctx.save();
+  ctx.strokeStyle = index % 2 ? "rgba(255, 239, 152, 0.48)" : "rgba(88, 199, 255, 0.52)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(point.x - Math.cos(angle) * 30, point.y - Math.sin(angle) * 30);
+  ctx.lineTo(point.x, point.y);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.5)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(point.x - Math.cos(angle) * 16, point.y - Math.sin(angle) * 16);
+  ctx.lineTo(point.x, point.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawCannonBullet(ctx, x, y, angle, index) {
   ctx.save();
   ctx.translate(Math.round(x), Math.round(y));
-  ctx.scale(facing, 1);
+  ctx.rotate(angle);
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = "rgba(88, 199, 255, 0.35)";
   ctx.fillRect(-20, -2, 18, 4);
@@ -2621,6 +3077,44 @@ function drawCannonBullet(ctx, x, y, facing, index) {
   ctx.fillRect(-4, -3, 12, 6);
   ctx.fillStyle = "#58c7ff";
   ctx.fillRect(5, -1, 6, 2);
+  ctx.restore();
+}
+
+function drawMissileLaunchFlare(ctx, point, angle) {
+  ctx.save();
+  ctx.translate(point.x, point.y);
+  ctx.rotate(angle);
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = "rgba(255, 239, 152, 0.85)";
+  ctx.fillRect(-8, -5, 18, 10);
+  ctx.fillStyle = "rgba(88, 199, 255, 0.58)";
+  ctx.fillRect(-16, -8, 12, 16);
+  ctx.restore();
+}
+
+function drawMissileTrail(ctx, point, angle, length) {
+  ctx.save();
+  ctx.translate(point.x, point.y);
+  ctx.rotate(angle);
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = "rgba(88, 199, 255, 0.3)";
+  ctx.fillRect(-length, -3, length, 6);
+  ctx.fillStyle = "rgba(255, 239, 152, 0.55)";
+  ctx.fillRect(-Math.round(length * 0.62), -1, Math.round(length * 0.62), 2);
+  ctx.restore();
+}
+
+function drawAngledMissile(ctx, point, angle, size) {
+  ctx.save();
+  ctx.translate(Math.round(point.x), Math.round(point.y));
+  ctx.rotate(angle);
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "#ffef98";
+  ctx.fillRect(-size * 0.25, -3, size * 0.52, 6);
+  ctx.fillStyle = "#ff6e4a";
+  ctx.fillRect(size * 0.18, -2, size * 0.22, 4);
+  ctx.fillStyle = "#58c7ff";
+  ctx.fillRect(-size * 0.34, -1, size * 0.18, 2);
   ctx.restore();
 }
 
@@ -2642,20 +3136,28 @@ function drawBattleActionEffect(ctx, anim, progress) {
     if (progress > 0.18 && progress < 0.72) {
       drawBattleAfterimage(ctx, progress);
     }
-    const x = lerp(150, battleLayout.enemyHome.x - 26, easeOut(Math.min(1, Math.max(0, (progress - 0.46) / 0.28))));
-    const y = battleLayout.enemyHome.y - battleLayout.unitSize * 0.46;
+    const start = battleWeaponPoint("player");
+    const end = battleHitPoint("enemy");
+    const slashT = easeOut(clamp01((progress - 0.46) / 0.28));
+    const x = lerp(start.x, end.x, slashT);
+    const y = lerp(start.y, end.y, slashT);
+    const angle = Math.atan2(end.y - start.y, end.x - start.x);
     if (progress > 0.54 && progress < 0.86) {
       drawEffect(ctx, "slash", x, y, 86, 1);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
       ctx.strokeStyle = "rgba(88, 255, 255, 0.78)";
       ctx.lineWidth = 5;
       ctx.beginPath();
-      ctx.moveTo(x - 42, y - 28);
-      ctx.lineTo(x + 38, y + 24);
+      ctx.moveTo(-34, -30);
+      ctx.lineTo(38, 22);
       ctx.stroke();
+      ctx.restore();
     }
     return;
   }
-  if (["muzzle", "rail", "missile"].includes(anim.kind)) {
+  if (["muzzle", "rail", "missile", "explosion"].includes(anim.kind)) {
     const fromEnemy = anim.actor === "enemy";
     if (anim.kind === "missile") {
       drawTripleMissiles(ctx, anim, progress);
@@ -2665,27 +3167,25 @@ function drawBattleActionEffect(ctx, anim, progress) {
       drawCannonBurst(ctx, anim, progress);
       return;
     }
-    const start = fromEnemy
-      ? { x: battleLayout.enemyHome.x - 48, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.44 }
-      : { x: battleLayout.playerHome.x + 48, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.44 };
-    const end = fromEnemy
-      ? { x: battleLayout.playerHome.x + 52, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.46 }
-      : { x: battleLayout.enemyHome.x - 52, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.46 };
+    const start = battleWeaponPoint(fromEnemy ? "enemy" : "player");
+    const end = battleHitPoint(fromEnemy ? "player" : "enemy");
     const fireT = Math.min(1, Math.max(0, (progress - 0.12) / 0.72));
     const x = lerp(start.x, end.x, easeOut(fireT));
     const y = lerp(start.y, end.y, easeOut(fireT));
     ctx.save();
     if (progress < 0.2) drawEffect(ctx, "hit", start.x + 4, start.y, 34 + progress * 80, 1);
-    ctx.strokeStyle = anim.kind === "rail" ? "#58c7ff" : "#ffef98";
-    ctx.lineWidth = anim.kind === "rail" ? 5 : 3;
+    ctx.strokeStyle = anim.kind === "rail" || anim.kind === "explosion" ? "#58c7ff" : "#ffef98";
+    ctx.lineWidth = anim.kind === "rail" || anim.kind === "explosion" ? 5 : 3;
     ctx.beginPath();
-    ctx.moveTo(fromEnemy ? Math.min(start.x, x + 54) : Math.max(start.x, x - 54), y);
+    const trail = 68;
+    const angle = Math.atan2(end.y - start.y, end.x - start.x);
+    ctx.moveTo(x - Math.cos(angle) * trail, y - Math.sin(angle) * trail);
     ctx.lineTo(x, y);
     ctx.stroke();
-    ctx.fillStyle = anim.kind === "missile" ? "#ff6e4a" : "#ffffff";
+    ctx.fillStyle = anim.kind === "explosion" ? "#ffef98" : "#ffffff";
     if (progress > 0.1 && progress < 0.92) ctx.fillRect(x - 8, y - 3, 16, 6);
     ctx.restore();
-    if (progress > 0.72) drawEffect(ctx, anim.kind === "missile" ? "explosion" : "hit", end.x + 18, end.y + 8, 78, 1);
+    if (progress > 0.72) drawEffect(ctx, anim.kind === "explosion" ? "explosion" : "hit", end.x - 24, end.y - 24, 78, 1);
     return;
   }
   const pulse = 72 + Math.sin(progress * Math.PI) * 16;
@@ -2695,17 +3195,24 @@ function drawBattleActionEffect(ctx, anim, progress) {
 function battleDamagePoint(anim, progress) {
   if (anim.kind === "missile" || anim.kind === "muzzle") {
     const path = missileBattlePath(anim, 0);
-    return { x: path.segmentB.end.x + path.facing * 12, y: path.segmentB.end.y - 12 };
+    return { x: path.end.x + path.axis.x * 12, y: path.end.y + path.axis.y * 12 - 12 };
   }
-  if (anim.target === "enemy") return { x: battleLayout.enemyHome.x - 24, y: battleLayout.enemyHome.y - battleLayout.unitSize * 0.78 };
-  if (anim.target === "player") return { x: battleLayout.playerHome.x + 18, y: battleLayout.playerHome.y - battleLayout.unitSize * 0.78 };
+  if (anim.target === "enemy") {
+    const point = battleHitPoint("enemy");
+    return { x: point.x, y: point.y - 10 };
+  }
+  if (anim.target === "player") {
+    const point = battleHitPoint("player");
+    return { x: point.x, y: point.y - 10 };
+  }
   return { x: anim.x + 28, y: anim.y - 8 };
 }
 
 function drawBattleAfterimage(ctx, progress) {
   const ghostT = Math.min(1, Math.max(0, (progress - 0.18) / 0.42));
-  const x = lerp(battleLayout.playerHome.x, battleLayout.enemyHome.x - 26, ghostT);
-  const y = progress < 0.46 ? battleLayout.playerHome.y : battleLayout.enemyHome.y;
+  const strike = battlePoint(battleLayout.enemyHome, { x: -42, y: 2 });
+  const x = lerp(battleLayout.playerHome.x, strike.x, ghostT);
+  const y = lerp(battleLayout.playerHome.y, strike.y, ghostT);
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.globalCompositeOperation = "lighter";
@@ -2817,6 +3324,7 @@ document.addEventListener("keydown", (event) => {
       showScrapDebug = false;
     }
     updateNpcEditor();
+    if (showCollisionDebug) collapseDevToolsForEditing();
     addLog(showCollisionDebug ? "碰撞调试已开启。" : "碰撞调试已关闭。");
   }
   if (DEV_MODE && event.key.toLowerCase() === "n") {
@@ -2827,6 +3335,7 @@ document.addEventListener("keydown", (event) => {
     }
     if (!showNpcDebug) npcEraseMode = false;
     updateNpcEditor();
+    if (showNpcDebug) collapseDevToolsForEditing();
     addLog(showNpcDebug ? "NPC 摆放已开启。" : "NPC 摆放已关闭。");
   }
   if (DEV_MODE && event.key.toLowerCase() === "m") {
@@ -2837,6 +3346,7 @@ document.addEventListener("keydown", (event) => {
     }
     if (!showScrapDebug) scrapEraseMode = false;
     updateNpcEditor();
+    if (showScrapDebug) collapseDevToolsForEditing();
     addLog(showScrapDebug ? "零件摆放已开启。" : "零件摆放已关闭。");
   }
   if (DEV_MODE && showCollisionDebug && event.key.toLowerCase() === "r") resetCollisionMap();
@@ -2849,16 +3359,14 @@ mapCanvas.addEventListener("pointerdown", (event) => {
     const missionPoint = missionBattlePointAt(x, y);
     if (missionPoint && isNearPlayer(x, y)) {
       event.preventDefault();
-      const enemy = currentTrainingEnemy();
-      setComms("系统", `${enemy?.name ?? "敌机"} 信号锁定，游隼出击。`, 0);
-      launchBattle();
+      updateInteractHint();
       return;
     }
     const clickedNpc = npcAt(x, y);
     const nearPlayer = isNearPlayer(x, y);
     if (clickedNpc && nearPlayer) {
       event.preventDefault();
-      interactWithNpcTarget(clickedNpc);
+      updateInteractHint();
       return;
     }
     const clickedScrap = scrapNodeAt(x, y);
@@ -2936,7 +3444,11 @@ document.querySelectorAll("button[data-panel]").forEach((button) => {
   button.addEventListener("click", () => openPanel(button.dataset.panel));
 });
 
-document.querySelector("[data-debug-toggle]")?.addEventListener("click", toggleDevMode);
+document.querySelector("[data-debug-toggle]")?.addEventListener("click", () => {
+  toggleDevMode();
+  closeSystemMenu();
+});
+document.querySelector("[data-debug-toggle]")?.classList.toggle("active", DEV_MODE);
 
 document.querySelectorAll("[data-demo-action]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -2945,6 +3457,7 @@ document.querySelectorAll("[data-demo-action]").forEach((button) => {
     if (action === "load") loadDemo();
     if (action === "reset") resetDemo();
     updateUi();
+    closeSystemMenu();
   });
 });
 
@@ -2954,12 +3467,20 @@ document.querySelectorAll("[data-dev-action]").forEach((button) => {
   button.addEventListener("click", () => {
     if (!DEV_MODE) return;
     const action = button.dataset.devAction;
+    if (action === "save-edits") saveDevEdits();
+    if (action === "preview-game") previewGameFromDev();
+    if (action === "save-preview") previewGameFromDev({ save: true });
+    if (action === "exit-dev") {
+      setDevMode(false);
+      addLog("已退出调试模式。");
+    }
     if (action === "collision-mode") {
       showCollisionDebug = !showCollisionDebug;
       if (showCollisionDebug) {
         showNpcDebug = false;
         showScrapDebug = false;
       }
+      if (showCollisionDebug) collapseDevToolsForEditing();
       addLog(showCollisionDebug ? "碰撞编辑已开启。" : "碰撞编辑已关闭。");
     }
     if (action === "npc-mode") {
@@ -2969,6 +3490,7 @@ document.querySelectorAll("[data-dev-action]").forEach((button) => {
         showScrapDebug = false;
       }
       if (!showNpcDebug) npcEraseMode = false;
+      if (showNpcDebug) collapseDevToolsForEditing();
       addLog(showNpcDebug ? "NPC 摆放已开启。" : "NPC 摆放已关闭。");
     }
     if (action === "scrap-mode") {
@@ -2978,6 +3500,7 @@ document.querySelectorAll("[data-dev-action]").forEach((button) => {
         showNpcDebug = false;
       }
       if (!showScrapDebug) scrapEraseMode = false;
+      if (showScrapDebug) collapseDevToolsForEditing();
       addLog(showScrapDebug ? "零件摆放已开启。" : "零件摆放已关闭。");
     }
     if (action === "collision-reset") resetCollisionMap();
@@ -3039,6 +3562,14 @@ document.querySelectorAll("[data-move]").forEach((button) => {
   button.addEventListener("pointerup", stop);
   button.addEventListener("pointerleave", stop);
   button.addEventListener("pointercancel", stop);
+});
+
+document.querySelector("[data-mobile-interact]")?.addEventListener("click", () => {
+  if (isDialogVisible()) {
+    closeDialog();
+    return;
+  }
+  interactWithNpc();
 });
 
 function loop() {

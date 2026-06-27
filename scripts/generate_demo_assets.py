@@ -163,77 +163,6 @@ def save_map_mechs():
     image.save(ASSETS / "map-mechs.png")
 
 
-def save_battle_mechs():
-    image, draw = sheet(6, 1, 96)
-
-    def mech(ox, primary, accent, visor, heavy=False, wings=False, cannon=False, blade=False):
-        black = "#05070a"
-        dark = "#111922"
-        mid = "#25313a"
-        metal = "#59636a"
-
-        # Legs
-        poly(draw, [(ox + 28, 67), (ox + 41, 67), (ox + 39, 91), (ox + 22, 91)], black)
-        poly(draw, [(ox + 55, 67), (ox + 68, 67), (ox + 74, 91), (ox + 57, 91)], black)
-        rect(draw, ox + 28, 68, 10, 18, primary)
-        rect(draw, ox + 58, 68, 10, 18, primary)
-        rect(draw, ox + 22, 86, 19, 6, mid)
-        rect(draw, ox + 56, 86, 19, 6, mid)
-
-        # Back parts
-        if wings:
-            poly(draw, [(ox + 9, 31), (ox + 29, 44), (ox + 21, 65), (ox + 4, 56)], black)
-            poly(draw, [(ox + 87, 31), (ox + 67, 44), (ox + 75, 65), (ox + 92, 56)], black)
-            poly(draw, [(ox + 11, 33), (ox + 28, 45), (ox + 21, 60), (ox + 7, 54)], mid)
-            poly(draw, [(ox + 85, 33), (ox + 68, 45), (ox + 75, 60), (ox + 89, 54)], mid)
-
-        # Arms
-        poly(draw, [(ox + 16, 39), (ox + 31, 35), (ox + 36, 62), (ox + 20, 68)], black)
-        poly(draw, [(ox + 80, 39), (ox + 65, 35), (ox + 60, 62), (ox + 76, 68)], black)
-        rect(draw, ox + 20, 40, 10, 24, primary)
-        rect(draw, ox + 66, 40, 10, 24, primary)
-        rect(draw, ox + 18, 61, 14, 8, metal)
-        rect(draw, ox + 64, 61, 14, 8, metal)
-
-        # Body
-        poly(draw, [(ox + 32, 26), (ox + 64, 26), (ox + 72, 58), (ox + 60, 73), (ox + 36, 73), (ox + 24, 58)], black)
-        poly(draw, [(ox + 34, 29), (ox + 62, 29), (ox + 68, 56), (ox + 58, 68), (ox + 38, 68), (ox + 28, 56)], primary)
-        rect(draw, ox + 36, 45, 24, 5, dark)
-        rect(draw, ox + 40, 54, 16, 4, accent)
-        rect(draw, ox + 30, 30, 36, 5, "#ffffff33")
-
-        # Head
-        poly(draw, [(ox + 36, 12), (ox + 60, 12), (ox + 65, 25), (ox + 57, 34), (ox + 39, 34), (ox + 31, 25)], black)
-        poly(draw, [(ox + 38, 14), (ox + 58, 14), (ox + 61, 24), (ox + 55, 30), (ox + 41, 30), (ox + 35, 24)], primary)
-        rect(draw, ox + 40, 20, 17, 4, visor)
-        rect(draw, ox + 45, 9, 7, 5, accent)
-
-        if heavy:
-            rect(draw, ox + 24, 25, 48, 7, black)
-            rect(draw, ox + 27, 25, 42, 5, accent)
-            rect(draw, ox + 18, 33, 14, 12, accent)
-            rect(draw, ox + 64, 33, 14, 12, accent)
-        if cannon:
-            rect(draw, ox + 75, 47, 18, 8, black)
-            rect(draw, ox + 79, 48, 15, 5, metal)
-            rect(draw, ox + 91, 45, 4, 11, accent)
-        if blade:
-            poly(draw, [(ox + 80, 26), (ox + 90, 19), (ox + 84, 75), (ox + 76, 76)], "#9ee9ff")
-            line(draw, [(ox + 82, 24), (ox + 78, 76)], "#ffffff", 2)
-
-    specs = [
-        ("#2fe0a1", "#60a8ff", "#d8fff4", False, True, True, False),
-        ("#ff6545", "#ffd35e", "#fff3aa", False, False, True, False),
-        ("#e5bd42", "#7bd389", "#fff2a0", True, False, False, False),
-        ("#61a5ff", "#fff08f", "#d6f2ff", False, True, False, False),
-        ("#ad70ff", "#ff624e", "#f1d8ff", True, False, True, False),
-        ("#d8dce2", "#9ee9ff", "#ffffff", False, False, False, True),
-    ]
-    for index, spec in enumerate(specs):
-        mech(index * 96, *spec)
-    image.save(ASSETS / "battle-mechs.png")
-
-
 def save_characters():
     image, draw = sheet(5, 1, 32)
 
@@ -395,7 +324,6 @@ Retro Java-phone inspired pixel assets for the small mecha RPG demo. These are o
 
 - `tiles.png`: 10 tiles at 32x32. Ground, wall, rubble, base, repair, road, crate, gate, oil, warning floor.
 - `map-mechs.png`: 6 map mech pieces at 32x32.
-- `battle-mechs.png`: 6 battle mech portraits at 96x96.
 - `characters.png`: 5 map characters at 32x32.
 - `portraits.png`: 5 comms portraits at 64x64.
 - `effects.png`: 8 attack/support effects at 64x64.
@@ -410,7 +338,6 @@ Run `python scripts/generate_demo_assets.py` to regenerate the whole pack.
 def main():
     save_tiles()
     save_map_mechs()
-    save_battle_mechs()
     save_characters()
     save_portraits()
     save_effects()

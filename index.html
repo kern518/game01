@@ -10,30 +10,40 @@
     <main class="shell">
       <section class="game-panel" aria-label="游戏画面">
         <div class="topbar">
-          <div>
+          <div class="brand-block">
             <h1>机甲风暴：废土试作</h1>
             <p id="areaLabel">旧城区外围</p>
+          </div>
+          <div class="objective-hud">
+            <span>当前目标</span>
+            <b id="objective">清理失控机甲</b>
           </div>
           <div class="resource-strip" aria-label="资源">
             <span><b id="credits">120</b> Cr</span>
             <span><b id="scrap">0</b> 零件</span>
             <span><b id="wins">0 / 4</b> 蓝图</span>
-            <span class="objective-pill"><b id="objective">清理失控机甲</b></span>
           </div>
+        </div>
+        <div class="hud-nav">
           <nav class="game-menu" aria-label="游戏菜单">
             <button data-screen="map">地图</button>
-            <button data-panel="mech">机体</button>
-            <button data-panel="pilot">人物</button>
-            <button data-panel="equip">装备</button>
-            <button data-panel="log">通讯</button>
-            <button data-demo-action="save">保存</button>
-            <button data-demo-action="load">读取</button>
-            <button data-demo-action="reset">重置</button>
             <button data-screen="hangar">机库</button>
-            <button type="button" data-debug-toggle>调试</button>
+            <button data-panel="mech">机体</button>
+            <button data-panel="equip">装备</button>
+            <button data-panel="pilot">人物</button>
+            <button data-panel="log">通讯</button>
           </nav>
+          <details class="system-menu">
+            <summary>系统</summary>
+            <div class="system-actions">
+              <button data-demo-action="save">保存</button>
+              <button data-demo-action="load">读取</button>
+              <button data-demo-action="reset">重置</button>
+              <button type="button" data-debug-toggle>调试</button>
+            </div>
+          </details>
         </div>
-        <div id="guideLine" class="guide-line">WASD / 方向键移动，靠近 NPC 按 E 或点击交互。</div>
+        <div id="guideLine" class="guide-line">WASD / 方向键移动，靠近目标按 E 交互。</div>
 
         <div class="screen-wrap">
           <div id="hangarLayer" class="hangar-layer" aria-label="机库界面">
@@ -63,6 +73,20 @@
             <div class="dev-tools-title">
               <strong>地图编辑</strong>
               <span>C 碰撞 / N NPC</span>
+              <div class="dev-window-actions" aria-label="调试窗口控制">
+                <button type="button" data-dev-window-action="collapse">收起</button>
+                <button type="button" data-dev-window-action="reset">复位</button>
+              </div>
+            </div>
+            <div class="dev-section dev-workflow">
+              <b>调试流程</b>
+              <p>编辑完成后保存当前布局，或切回普通游戏界面预览体验。</p>
+              <div class="dev-actions">
+                <button type="button" class="dev-primary" data-dev-action="save-edits">保存编辑</button>
+                <button type="button" data-dev-action="preview-game">预览游戏</button>
+                <button type="button" class="dev-primary" data-dev-action="save-preview">保存并预览</button>
+                <button type="button" data-dev-action="exit-dev">退出调试</button>
+              </div>
             </div>
             <div class="dev-mode-row" aria-label="编辑模式">
               <button type="button" data-dev-action="collision-mode">碰撞</button>
@@ -166,6 +190,7 @@
               <button data-action="missile">导弹</button>
               <button data-action="guard">防御</button>
               <button data-action="repair">修理</button>
+              <button data-action="flee">逃跑</button>
             </div>
             <div id="battleResult" class="battle-result hidden" role="dialog" aria-live="assertive">
               <div class="battle-result-card">
@@ -288,6 +313,7 @@
       <button data-move="left">◀</button>
       <button data-move="down">▼</button>
       <button data-move="right">▶</button>
+      <button type="button" data-mobile-interact>E</button>
     </div>
 
     <script src="game.js?v=staged-cannon-v33"></script>
